@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.0
+// @version      1.3.1
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @updateURL    https://raw.githubusercontent.com/ПЛЕЙСХОЛДЕР_ЛОГИНА/ПЛЕЙСХОЛДЕР_РЕПОЗИТОРИЯ/main/redmine-psibia.user.js
-// @downloadURL  https://raw.githubusercontent.com/ПЛЕЙСХОЛДЕР_ЛОГИНА/ПЛЕЙСХОЛДЕР_РЕПОЗИТОРИЯ/main/redmine-psibia.user.js
+// @updateURL    https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.js
+// @downloadURL  https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.js
 // @grant        none
 // ==/UserScript==
 
