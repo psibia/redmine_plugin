@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           Redmine Theme from psibia
 @namespace      github.com/psibia
-@version        1.0.0
+@version        1.0.1
 @description    Улучшенный дизайн доски задач Redmine
 @author         psibia.p
 @updateURL      https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.css
@@ -10,7 +10,7 @@
     
     
     
-     /* Подключаем Inter: полный набор весов от 100 до 900 */
+     /* Подключаем Inter: полный набор весов от 100 до 900 (проверка обновления) */
     @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&display=swap');
     
     h3, .wiki h3 { font-family: 'Inter', sans-serif !important; font-weight: 600 !important; }
