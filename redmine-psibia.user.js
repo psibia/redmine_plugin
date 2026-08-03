@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.2
+// @version      1.3.3
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
@@ -1124,10 +1124,21 @@
 
             .addon-compact-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; margin-top: 5px; }
 
+            /* НОВАЯ ОБЕРТКА ДЛЯ ИЕРАРХИИ */
+            .addon-tree-row {
+                position: relative;
+                display: flex;
+                align-items: stretch;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
             .addon-compact-card {
-                display: flex; align-items: center; background: #fff;
-                border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 10px;
-                transition: all 0.2s; gap: 10px; min-height: 28px;
+                flex-grow: 1;
+                display: flex; align-items: stretch; background: #fff;
+                border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 10px 0 0;
+                transition: all 0.2s; gap: 10px; min-height: 32px;
+                overflow: hidden; min-width: 0;
             }
             .addon-compact-card:hover { border-color: #94a3b8; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 
@@ -1138,7 +1149,7 @@
                 background-color: #e11d48 !important; color: #ffffff !important; border-color: #e11d48 !important;
             }
             .tag-blockiruet {
-                background-color: color: #ffffff !important; border-color: #f97316 !important;
+                background-color: #ffffff !important; color: #334155 !important; border-color: #f97316 !important; border-width: 1px !important; border-style: solid !important;
             }
 
             .addon-icon { width: 14px; height: 14px; flex-shrink: 0; margin-right: 6px; margin-left: 2px; stroke-width: 2.5; }
@@ -1146,7 +1157,7 @@
             .icon-red   { color: #dc2626; fill: #dc2626; border: none; }
             .icon-orange { color: #ea580c; }
 
-            .addon-main-info { flex-grow: 1; display: flex; align-items: center; gap: 4px; overflow: hidden; cursor: default; }
+            .addon-main-info { flex-grow: 1; display: flex; align-items: center; gap: 4px; overflow: hidden; cursor: default; padding: 6px 0; padding-left: 10px; }
 
             .addon-relation-tag {
                 font-size: 11px; text-transform: lowercase; color: #475569; font-weight: 600;
@@ -1161,9 +1172,10 @@
             }
             .addon-summary:hover { color: #2563eb; text-decoration: underline; }
 
-            .addon-meta { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #64748b; flex-shrink: 0; }
+            .addon-meta { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #64748b; flex-shrink: 0; padding: 8px 0; }
 
-            .addon-status { padding: 3px 10px; border-radius: 12px; font-weight: 500; white-space: nowrap; font-size: 12px; }
+            /* Зафиксировал ширину статуса на 100px, чтобы они стояли ровно как в таблице */
+            .addon-status { padding: 3px 10px; border-radius: 12px; font-weight: 500; white-space: nowrap; font-size: 12px; text-align: center; min-width: 100px; box-sizing: border-box; }
             .st-step-1 { background: #f3f4f6; color: #4b5563; }
             .st-step-2 { background: #7dd3fc; color: #0c4a6e; }
             .st-step-3 { background: #a5b4fc; color: #1e1b4b; }
@@ -1188,14 +1200,14 @@
             .date-over-filled { background: #e11d48; border: 1px solid #e11d48; color: #fff; }
             .date-empty-badge { background: #fff; border: 1px solid #e2e8f0; color: #94a3b8; }
 
+            .addon-actions { display: flex; align-items: center; padding: 6px 0; }
             .addon-actions a { color: #cbd5e1; text-decoration: none; font-size: 16px; line-height: 1; display: flex; align-items: center; transition: color 0.2s; cursor: pointer; }
             .addon-actions a:hover { color: #ef4444; }
         `;
         document.head.appendChild(style);
     }
 
-    //тут делаем все про таблицы подзадач и связаных задач, не трогай, пока работает!!!!!
-    function parseAndTransformTable(containerId, listId) {
+   function parseAndTransformTable(containerId, listId) {
         const container = document.getElementById(containerId);
         if (!container) return;
         const table = container.querySelector('table.list.issues');
@@ -1208,7 +1220,6 @@
         let releaseBlock = document.getElementById(releaseBlockId);
         if (releaseBlock) releaseBlock.remove();
 
-        //создаем контейнеры для элементов
         list = document.createElement('div');
         list.id = listId;
         list.className = 'addon-compact-list';
@@ -1224,7 +1235,54 @@
         const KNOWN_RELATIONS = ['связана с', 'блокируется', 'блокирует', 'дублируется', 'дублирует', 'следующая', 'предыдущая', 'скопирована с', 'скопирована в'];
         const releaseRegex = /^Релиз\s+\d+\.\d+\.\d+/i;
 
-        rows.forEach(row => {
+        // 1. Считываем данные и уровни вложенности (idnt-X)
+        const rowsData = Array.from(rows).map(row => {
+            let level = 0;
+            const idntMatch = row.className.match(/idnt-(\d+)/);
+            if (idntMatch) level = parseInt(idntMatch[1], 10);
+            return { row, level };
+        });
+
+        // 2. Логика для отрисовки веток "а-ля Reddit"
+        for (let i = 0; i < rowsData.length; i++) {
+            const currentLevel = rowsData[i].level;
+            const lines = [];
+            let hasSiblingBelow = false;
+
+            for (let lvl = 1; lvl <= currentLevel; lvl++) {
+                if (lvl === currentLevel) {
+                    // Проверяем, есть ли ниже сиблинги того же уровня в этой же ветке
+                    for (let j = i + 1; j < rowsData.length; j++) {
+                        if (rowsData[j].level < currentLevel) break; // Вышли из ветки родителя
+                        if (rowsData[j].level === currentLevel) {
+                            hasSiblingBelow = true;
+                            break;
+                        }
+                    }
+                    lines.push(lvl); // Линию к самой себе мы рисуем всегда
+                } else {
+                    // Проверяем, нужно ли тянуть транзитную вертикальную линию вниз (если у родителя есть еще дети ниже нас)
+                    let hasParentSiblingBelow = false;
+                    for (let j = i + 1; j < rowsData.length; j++) {
+                        if (rowsData[j].level < lvl) break; // Вышли из ветки прародителя
+                        if (rowsData[j].level === lvl) {
+                            hasParentSiblingBelow = true;
+                            break;
+                        }
+                    }
+                    if (hasParentSiblingBelow) {
+                        lines.push(lvl);
+                    }
+                }
+            }
+            rowsData[i].hasSiblingBelow = hasSiblingBelow;
+            rowsData[i].lines = lines;
+        }
+
+        const STEP = 26; // Отступ (в пикселях) на каждый уровень вложенности
+
+        // 3. Формируем карточки
+        rowsData.forEach(({ row, level, lines, hasSiblingBelow }) => {
             const subjectLink = row.querySelector('.subject a');
             const href = subjectLink ? subjectLink.href : '#';
             const trackerAndId = subjectLink ? subjectLink.textContent : ('#' + row.id.replace(/\D/g, ''));
@@ -1261,21 +1319,18 @@
 
             const fullSummary = `${trackerAndId} ${subjectTopic}`;
 
-            //тут выделяем таски с релизами в отдельный блок под связанными задачами
+            // Логика выделения релизов
             if (containerId === 'relations' && releaseRegex.test(subjectTopic)) {
                 hasReleases = true;
-
                 if (!releaseListContainer) {
                     releaseListContainer = document.createElement('div');
                     releaseListContainer.id = releaseBlockId;
                     releaseListContainer.innerHTML = `<p><strong>Релиз</strong></p>`;
-
                     const innerList = document.createElement('div');
                     innerList.className = 'addon-compact-list';
                     releaseListContainer.appendChild(innerList);
                 }
 
-                //в финальной версии заменить вхождение на точное совпадение, пока для отладки так оставил
                 let relStatusClass = 'st-step-1';
                 if (['уточнение','пауз', 'ожидан', 'отложена'].some(k => s.includes(k))) relStatusClass = 'st-warn';
                 else if (['закр', 'отмен', 'не актуально'].some(k => s.includes(k))) relStatusClass = 'st-closed';
@@ -1287,15 +1342,12 @@
                 else if (['готова к разраб', 'разработка', 'доработ', 'dev'].some(k => s.includes(k))) relStatusClass = 'st-step-3';
                 else if (['в работе', 'работ'].some(k => s.includes(k))) relStatusClass = 'st-step-2';
 
-                const fullSummaryRelease = subjectTopic;
-
                 const relCard = document.createElement('div');
                 relCard.className = 'addon-compact-card';
                 relCard.style.borderLeft = '4px solid #3b82f6';
-
                 relCard.innerHTML = `
                     <div class="addon-main-info">
-                        <a href="${href}" class="addon-summary" title="${fullSummaryRelease}">${fullSummaryRelease}</a>
+                        <a href="${href}" class="addon-summary" title="${subjectTopic}">${subjectTopic}</a>
                     </div>
                     <div class="addon-meta">
                         <span class="addon-user" title="${assignee}">${assignee}</span>
@@ -1303,13 +1355,9 @@
                     </div>
                     ${unlinkBtn ? `<div class="addon-actions"><a href="${unlinkBtn.href}" data-remote="true" data-method="delete" data-confirm="Разорвать связь?" title="Удалить связь">×</a></div>` : ''}
                 `;
-
                 relCard.querySelector('.addon-summary').addEventListener('click', (e) => {
                     if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
-                    if (window.self !== window.top) {
-                        e.preventDefault();
-                        openModal(href, relCard);
-                    }
+                    if (window.self !== window.top) { e.preventDefault(); openModal(href, relCard); }
                 });
 
                 releaseListContainer.children[1].appendChild(relCard);
@@ -1320,16 +1368,9 @@
             const relLower = relationTag.toLowerCase().trim();
 
             if (relLower === 'блокируется') {
-                if (!isResolved) {
-                    relationTag = 'блокируется задачей';
-                    hasBlocker = true;
-                    tagColorClass = 'tag-blocking';
-                }
+                if (!isResolved) { relationTag = 'блокируется задачей'; hasBlocker = true; tagColorClass = 'tag-blocking'; }
             } else if (relLower === 'блокирует') {
-                if (!isResolved) {
-                    relationTag = 'блокирует задачу';
-                    tagColorClass = 'tag-blockiruet';
-                }
+                if (!isResolved) { relationTag = 'блокирует задачу'; tagColorClass = 'tag-blockiruet'; }
             }
             if (relationTag.includes('блокируется задачей') && !isResolved) tagColorClass = 'tag-blocking';
 
@@ -1356,7 +1397,6 @@
             let cardClass = 'addon-compact-card';
             let statusClass = 'st-step-1';
 
-            //тут тоже меняем на полное соответствие, использовать === а не == (ВАЖНО!!!)
             if (['уточнение','пауз', 'ожидан', 'отложена'].some(k => s.includes(k))) statusClass = 'st-warn';
             else if (['закр', 'отмен', 'не актуально'].some(k => s.includes(k))) statusClass = 'st-closed';
             else if (['решена'].some(k => s.includes(k))) statusClass = 'st-step-8';
@@ -1374,6 +1414,39 @@
                 cardClass += ' card-dimmed';
             }
 
+            // Генерируем HTML для отрисовки веток
+            let treeHtml = '';
+            if (level > 0) {
+                // z-index: 1 и top: -5px (чтобы линия проходила сквозь зазор margin в 5px между карточками)
+                treeHtml = `<div class="addon-tree-lines" style="position: absolute; left: 0; top: -5px; bottom: 0; width: ${level * STEP}px; pointer-events: none; z-index: 1;">`;
+
+                lines.forEach(lvl => {
+                    const leftPos = lvl * STEP - (STEP / 2); // Рисуем ровно по центру отступа
+
+                    if (lvl === level) {
+                        if (!hasSiblingBelow) {
+                            // Последняя карточка в ветке (рисуем красивый уголок "L")
+                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; height: calc(50% + 2.5px); width: ${STEP / 2}px; border-left: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; border-bottom-left-radius: 6px;"></div>`;
+                        } else {
+                            // Есть сиблинги ниже (рисуем Т-образный перекресток)
+                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; bottom: 0; border-left: 2px solid #cbd5e1;"></div>`;
+                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: calc(50% + 2.5px); width: ${STEP / 2}px; border-top: 2px solid #cbd5e1;"></div>`;
+                        }
+                    } else {
+                        // Транзитная линия для нижних элементов
+                        treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; bottom: 0; border-left: 2px solid #cbd5e1;"></div>`;
+                    }
+                });
+
+                treeHtml += `</div>`;
+            }
+
+            // Обертка ряда (смещаем ее контент с помощью padding-left)
+            const rowWrapper = document.createElement('div');
+            rowWrapper.className = 'addon-tree-row';
+            rowWrapper.style.paddingLeft = `${level * STEP}px`;
+
+            // Сама карточка
             const card = document.createElement('div');
             card.className = cardClass;
             card.innerHTML = `
@@ -1392,13 +1465,13 @@
 
             card.querySelector('.addon-summary').addEventListener('click', (e) => {
                 if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
-                if (window.self !== window.top) {
-                    e.preventDefault();
-                    openModal(href, card);
-                }
+                if (window.self !== window.top) { e.preventDefault(); openModal(href, card); }
             });
 
-            list.appendChild(card);
+            // Собираем всё как матрёшку
+            rowWrapper.innerHTML = treeHtml;
+            rowWrapper.appendChild(card);
+            list.appendChild(rowWrapper);
         });
 
         table.parentNode.insertBefore(list, table);
@@ -1418,7 +1491,6 @@
             }
         }
     }
-
     // =================================================================================
     // ЗАПУСК И СЛЕЖЕНИЕ (нельзя вырезать, иначе не будут обновляться изменения своййств)
     // =================================================================================
