@@ -1,11 +1,10 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.4
+// @version      1.3.5
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @changelog    - Добавлена новая система получения и установки обновлений\n- Оптимизировано отображение подзадач и связанных задач
 // @grant        none
 // ==/UserScript==
 
@@ -5105,207 +5104,359 @@ function openFiltersModal() {
 
 
     // =================================================================================
-    // КАСТОМНЫЙ АВТО-АПДЕЙТЕР
+    // КАСТОМНЫЙ АВТО-АПДЕЙТЕР (БЕЗОТКАЗНАЯ СИСТЕМА СОСТОЯНИЙ)
     // =================================================================================
     function initAutoUpdater() {
+        if (window.addonAutoUpdaterInitialized) return;
+        window.addonAutoUpdaterInitialized = true;
+
+        if (window.self !== window.top) return;
+
+        let skipTimerInterval = null;
+
         const SCRIPT_URL = 'https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.js';
+        const GITHUB_REPO_URL = 'https://github.com/psibia/redmine_plugin/blob/main/redmine-psibia.user.js';
 
-        // --- НАСТРОЙКИ ВРЕМЕНИ (В МИЛЛИСЕКУНДАХ) ---
+        // --- НАСТРОЙКИ ВРЕМЕНИ ---
+        // 🔴 ТЕСТОВЫЙ РЕЖИМ (5 секунд проверка, 10 секунд на "пропустить")
+        //const CHECK_INTERVAL = 5000;
+        //const REMIND_LATER = 10000;
 
-        //ТЕСТОВЫЙ РЕЖИМ
-        // const CHECK_INTERVAL = 5000;
-        // const REMIND_LATER = 10000;
-
-        //БОЕВОЙ РЕЖИМ
+        // 🟢 БОЕВОЙ РЕЖИМ
         const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
         const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
+        // -------------------------
 
-        // -------------------------------------------
+        const currentVersion = typeof GM_info !== 'undefined' ? GM_info.script.version : '*.*.*';
 
-        // Получаем текущую версию скрипта
-        const currentVersion = typeof GM_info !== 'undefined' ? GM_info.script.version : '1.3.2';
+        // Ключи _v10 для чистой работы стейт-машины
+        const STATE_KEY = 'psibia_upd_state';
+        const TARGET_KEY = 'psibia_upd_target';
+        const CHANGELOG_KEY = 'psibia_upd_changelog';
+        const NEXT_KEY = 'psibia_upd_next';
+        const SKIP_KEY = 'psibia_upd_skip';
 
-        const now = new Date().getTime();
-        // Используем _v3, чтобы игнорировать старые тестовые сохранения в localStorage
-        const nextCheck = parseInt(localStorage.getItem('addon_update_time_v3') || '0', 10);
-        const skippedVersion = localStorage.getItem('addon_skip_version_v3') || '';
+        let state = localStorage.getItem(STATE_KEY) || 'IDLE';
+        let targetVer = localStorage.getItem(TARGET_KEY) || '';
+        let savedChangelog = localStorage.getItem(CHANGELOG_KEY) || 'Описание изменений не добавлено.';
+        let skippedVer = localStorage.getItem(SKIP_KEY) || '';
+        let nextCheck = parseInt(localStorage.getItem(NEXT_KEY) || '0', 10);
 
-        // Если время проверки еще не пришло — выходим
-        if (now < nextCheck) return;
+        // ==========================================
+        // ЭТАП 1: ПРОВЕРКА СОСТОЯНИЙ ПРИ ЗАГРУЗКЕ
+        // ==========================================
 
-        // Делаем фоновый запрос
-        fetch(SCRIPT_URL + '?t=' + now)
+        if (state === 'PENDING') {
+            // Юзер перезагрузил страницу или нажал "Проверить" во время ожидания
+            if (compareVersions(currentVersion, targetVer) >= 0) {
+                localStorage.setItem(STATE_KEY, 'SUCCESS');
+                showModal('success', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
+            } else {
+                localStorage.setItem(STATE_KEY, 'FAILED');
+                showModal('fail', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
+            }
+            return;
+        }
+
+        if (state === 'FAILED') {
+            // Если юзер перезагрузил страницу на экране ошибки
+            if (compareVersions(currentVersion, targetVer) >= 0) {
+                localStorage.setItem(STATE_KEY, 'SUCCESS');
+                showModal('success', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
+            } else {
+                showModal('fail', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
+            }
+            return;
+        }
+
+        if (state === 'SUCCESS') {
+            // Окно успеха, пока юзер не нажмет "Продолжить"
+            showModal('success', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
+            return;
+        }
+
+        // ==========================================
+        // ЭТАП 2: ОБЫЧНАЯ ПРОВЕРКА ОБНОВЛЕНИЙ (IDLE)
+        // ==========================================
+        if (Date.now() < nextCheck) return;
+
+        fetch(SCRIPT_URL + '?t=' + Date.now())
             .then(response => {
                 if (!response.ok) throw new Error('Network error');
                 return response.text();
             })
             .then(text => {
-                // Парсим версию и чейнджлог из ответа
                 const versionMatch = text.match(/@version\s+([\d\.]+)/);
                 const changelogMatch = text.match(/@changelog\s+(.+)/);
 
                 if (!versionMatch) return;
 
                 const newVersion = versionMatch[1];
-                const changelog = changelogMatch ? changelogMatch[1].trim() : 'Описание изменений не добавлено.';
+                const changelog = changelogMatch ? changelogMatch[1].trim().replace(/\\n/g, '<br>') : 'Описание изменений не добавлено.';
 
-                // Сравниваем версии
-                if (isNewerVersion(currentVersion, newVersion)) {
-                    if (newVersion === skippedVersion) {
-                        // Если версию пропустили, откладываем следующую проверку
-                        localStorage.setItem('addon_update_time_v3', now + CHECK_INTERVAL);
+                if (compareVersions(newVersion, currentVersion) > 0) {
+                    if (newVersion === skippedVer) {
+                        localStorage.setItem(NEXT_KEY, Date.now() + CHECK_INTERVAL);
                         return;
                     }
 
-                    // Показываем красивую модалку
-                    showUpdateModal(currentVersion, newVersion, changelog, SCRIPT_URL);
+                    // Обновление найдено, сохраняем данные и показываем первичный экран (State остается IDLE до нажатия Установить)
+                    localStorage.setItem(TARGET_KEY, newVersion);
+                    localStorage.setItem(CHANGELOG_KEY, changelog);
+                    showModal('primary', currentVersion, newVersion, changelog, SCRIPT_URL);
                 } else {
-                    // Версия актуальная, спим до следующей проверки
-                    localStorage.setItem('addon_update_time_v3', now + CHECK_INTERVAL);
+                    localStorage.setItem(NEXT_KEY, Date.now() + CHECK_INTERVAL);
                 }
             })
-            .catch(error => console.warn('Ошибка проверки обновлений:', error));
+            .catch(err => console.warn('Ошибка проверки обновлений:', err));
 
-        // Вспомогательная функция для корректного сравнения версий (1.10.0 > 1.2.0)
-        function isNewerVersion(curr, newVer) {
-            const v1 = curr.split('.').map(Number);
-            const v2 = newVer.split('.').map(Number);
-            for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
-                const num1 = v1[i] || 0;
-                const num2 = v2[i] || 0;
-                if (num2 > num1) return true;
-                if (num1 > num2) return false;
+        // Вспомогательная функция сравнения версий
+        function compareVersions(v1, v2) {
+            const a = v1.split('.').map(Number);
+            const b = v2.split('.').map(Number);
+            for (let i = 0; i < Math.max(a.length, b.length); i++) {
+                const n1 = a[i] || 0, n2 = b[i] || 0;
+                if (n1 > n2) return 1;
+                if (n1 < n2) return -1;
             }
-            return false;
+            return 0;
         }
 
-        // Отрисовка модального окна
-        function showUpdateModal(currVer, newVer, changelog, url) {
-            if (document.getElementById('addon-update-overlay')) return;
+        // ==========================================
+        // ГЕНЕРАЦИЯ МОДАЛЬНОГО ОКНА
+        // ==========================================
+        function showModal(type, currVer, targetVer, changelog, url) {
+            let overlay = document.getElementById('psibia-upd-overlay');
 
-            const overlay = document.createElement('div');
-            overlay.id = 'addon-update-overlay';
-            overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.4); z-index: 100000; backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center;';
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'psibia-upd-overlay';
+                overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.6); z-index: 100000; backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center;';
+                document.body.appendChild(overlay);
 
-            const modalHtml = `
-                <style>
-                    #addon-update-modal-box {
-                        background: #fff; width: 450px; border-radius: 12px;
-                        box-shadow: 0 20px 50px rgba(0,0,0,0.3);
-                        display: flex; flex-direction: column;
-                        box-sizing: border-box; overflow: hidden;
-                        font-family: 'Inter', sans-serif !important;
-                    }
-                    #addon-update-modal-box * {
-                        box-sizing: border-box !important;
-                        font-family: 'Inter', sans-serif !important;
-                    }
+                const style = document.createElement('style');
+                style.textContent = `
+                    .ps-modal-box { background: #fff; width: 500px; max-height: 85vh; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); display: flex; flex-direction: column; font-family: 'Inter', sans-serif !important; box-sizing: border-box; overflow: hidden; }
+                    .ps-modal-box * { box-sizing: border-box !important; font-family: 'Inter', sans-serif !important; }
+                    .ps-modal-content { overflow-y: auto; padding: 20px 24px; }
 
-                    /* Эталонные кнопки */
-                    .addon-upd-btn {
-                        display: inline-flex !important;
-                        align-items: center !important;
-                        justify-content: center !important;
-                        gap: 6px !important;
-                        border: 1px solid transparent !important;
-                        border-radius: 6px !important;
-                        font-size: 13px !important;
-                        font-weight: 500 !important;
-                        cursor: pointer !important;
-                        transition: all 0.2s !important;
-                        text-decoration: none !important;
-                    }
+                    .ps-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; gap: 8px !important; border: 1px solid transparent !important; border-radius: 6px !important; font-size: 13px !important; font-weight: 600 !important; cursor: pointer !important; transition: all 0.2s !important; height: 38px !important; outline: none !important; width: 100%; }
+                    .ps-btn:disabled { opacity: 0.5 !important; cursor: not-allowed !important; }
 
-                    /* Главная кнопка */
-                    .addon-upd-btn-primary {
-                        background: #2563eb !important;
-                        color: #fff !important;
-                        height: 36px !important;
-                        width: 100% !important;
-                        font-weight: 600 !important;
-                    }
-                    .addon-upd-btn-primary:hover { background: #1d4ed8 !important; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important; }
+                    .ps-btn-blue { background: #2563eb !important; color: #fff !important; }
+                    .ps-btn-blue:not(:disabled):hover { background: #1d4ed8 !important; }
 
-                    /* Второстепенные кнопки */
-                    .addon-upd-btn-secondary {
-                        background: #f8fafc !important;
-                        color: #475569 !important;
-                        border-color: #cbd5e1 !important;
-                        height: 32px !important;
-                        flex: 1 !important;
-                    }
-                    .addon-upd-btn-secondary:hover { background: #f1f5f9 !important; border-color: #94a3b8 !important; color: #0f172a !important; }
+                    .ps-btn-gray { background: #f1f5f9 !important; color: #475569 !important; border: 1px solid #e2e8f0 !important; }
+                    .ps-btn-gray:not(:disabled):hover { background: #e2e8f0 !important; color: #0f172a !important; }
 
-                    .addon-upd-btn-danger {
-                        background: #fee2e2 !important;
-                        color: #dc2626 !important;
-                        height: 32px !important;
-                        flex: 1 !important;
-                    }
-                    .addon-upd-btn-danger:hover { background: #fca5a5 !important; color: #b91c1c !important; }
-                </style>
+                    .ps-btn-red { background: #fef2f2 !important; color: #dc2626 !important; border: 1px solid #fecaca !important; }
+                    .ps-btn-red:not(:disabled):hover { background: #fee2e2 !important; color: #b91c1c !important; }
 
-                <div id="addon-update-modal-box">
-                    <div style="display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid #e2e8f0;">
-                        <div style="width: 42px; height: 42px; background: #eff6ff; color: #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    @keyframes psPulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+                    .ps-pulse { animation: psPulse 1.5s infinite ease-in-out; }
+                `;
+                document.head.appendChild(style);
+            }
+
+            if (skipTimerInterval) {
+                clearInterval(skipTimerInterval);
+                skipTimerInterval = null;
+            }
+
+            let html = `<div class="ps-modal-box">`;
+
+            // ЭКРАН 1: НАШЛИ ОБНОВЛЕНИЕ
+            if (type === 'primary') {
+                html += `
+                    <div style="display: flex; align-items: center; gap: 14px; padding: 20px 24px; border-bottom: 1px solid #e2e8f0;">
+                        <div style="width: 44px; height: 44px; background: #eff6ff; color: #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                         </div>
-                        <div style="display: flex; flex-direction: column; gap: 4px;">
-                            <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #0f172a; line-height: 1.2;">Доступно обновление скрипта Redmine</h3>
-                            <div style="font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 6px;">
-                                Текущая: <span style="font-weight: 600; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">v${currVer}</span>
-                                <span style="color: #cbd5e1;">➔</span>
-                                Новая: <span style="font-weight: 600; color: #16a34a; background: #dcfce7; padding: 2px 6px; border-radius: 4px; border: 1px solid #bbf7d0;">v${newVer}</span>
+                        <div>
+                            <h3 style="margin: 0 0 4px 0; font-size: 16px; font-weight: 600; color: #0f172a;">Доступно обновление расширения Redmine</h3>
+                            <div style="font-size: 13px; color: #64748b;">
+                                Текущая: <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">v${currVer}</span> ➔
+                                Новая: <span style="background: #dcfce7; color: #16a34a; font-weight: 600; padding: 2px 6px; border-radius: 4px;">v${targetVer}</span>
                             </div>
                         </div>
                     </div>
-
-                    <div style="padding: 20px 24px; background: #f8fafc;">
-                        <h4 style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; letter-spacing: 0.05em;">Что нового:</h4>
-                        <div style="font-size: 13px; color: #334155; line-height: 1.5; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
-                            ${changelog}
+                    <div class="ps-modal-content">
+                        <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 600; margin-bottom: 8px;">Что нового:</div>
+                        <div style="font-size: 13px; color: #334155; line-height: 1.5; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">${changelog}</div>
+                    </div>
+                    <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px; background: #fff;">
+                        <button id="ps-btn-install" class="ps-btn ps-btn-blue">Установить обновление</button>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="ps-btn-later" class="ps-btn ps-btn-gray">Напомнить позже</button>
+                            <button id="ps-btn-skip" class="ps-btn ps-btn-red" disabled>Пропустить версию (10)</button>
                         </div>
                     </div>
-
-                    <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 12px; background: #fff;">
-                        <button id="addon-btn-update" class="addon-upd-btn addon-upd-btn-primary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                            Установить обновление
-                        </button>
-                        <div style="display: flex; gap: 12px;">
-                            <button id="addon-btn-remind" class="addon-upd-btn addon-upd-btn-secondary">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                                Напомнить позже
-                            </button>
-                            <button id="addon-btn-skip" class="addon-upd-btn addon-upd-btn-danger">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                Пропустить версию
-                            </button>
+                `;
+            }
+            // ЭКРАН 2: ОЖИДАНИЕ УСТАНОВКИ
+            else if (type === 'waiting') {
+                html += `
+                    <div style="display: flex; align-items: center; gap: 14px; padding: 20px 24px; border-bottom: 1px solid #e2e8f0;">
+                        <div style="width: 44px; height: 44px; background: #fef08a; color: #ca8a04; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        </div>
+                        <div>
+                            <h3 style="margin: 0 0 4px 0; font-size: 16px; font-weight: 600; color: #0f172a;">Ожидание установки...</h3>
+                            <div class="ps-pulse" style="font-size: 13px; color: #ca8a04; font-weight: 500;">Перейдите во вкладку установки скриптов Tampermonkey</div>
                         </div>
                     </div>
-                </div>
-            `;
+                    <div class="ps-modal-content">
+                        <p style="margin: 0 0 10px 0; font-size: 13px; color: #334155; line-height: 1.5;">У вас должна была открыться вкладка <b>Tampermonkey</b>. Нажмите кнопку <b>«Обновить»</b> или <b>«Перезаписать»</b> в открывшейся вкладке.</p>
 
-            overlay.innerHTML = modalHtml;
-            document.body.appendChild(overlay);
+                        <details style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; cursor: pointer;">
+                            <summary style="font-weight: 600; font-size: 13px; color: #ef4444; outline: none; margin: 0;">Что делать, если вкладка не открывается?</summary>
+                            <div style="margin-top: 12px; font-size: 13px; color: #475569; line-height: 1.5; cursor: default;">
+                                <p style="margin: 0 0 6px 0; color: #0f172a;"><b>Способ 1: Если скачался файл</b></p>
+                                <ol style="margin: 0 0 12px 0; padding-left: 20px;">
+                                    <li>Найдите скачанный файл в папке "Загрузки".</li>
+                                    <li>Кликните по нему правой кнопкой мыши ➔ <b>«Открыть с помощью»</b>.</li>
+                                    <li>Выберите ваш текущий браузер. Должна открыться вкладка установки скриптов Tampermonkey.</li>
+                                    <li>Во вкладке Tampermonkey нажмите кнопку <b>«Обновить»</b> или <b>«Перезаписать»</b>.</li>
+                                </ol>
+                                <p style="margin: 0 0 6px 0; color: #0f172a;"><b>Способ 2: Если предыдущий способ не сработал</b></p>
+                                <ol style="margin: 0 0 12px 0; padding-left: 20px;">
+                                    <li style="margin-bottom: 4px;">Откройте скачанный файл через текстовый редактор и скопируйте содержимое (Ctrl+A ➔ Ctrl+C).</li>
+                                    <li style="margin-bottom: 4px;">В браузере нажмите на иконку расширения Tampermonkey.</li>
+                                    <li style="margin-bottom: 4px;">Найдите строку <b>"Redmine from psibia"</b>, нажмите на стрелочку справа (<b>></b>), чтобы раскрыть меню действий.</li>
+                                    <li style="margin-bottom: 4px;">Нажмите на пункт меню «Править».</li>
+                                    <li style="margin-bottom: 4px;">В открывшемся редакторе выделите весь имеющийся код (Ctrl+A) и вставьте скопированный новый код (Ctrl+V).</li>
+                                    <li>Слева сверху нажмите <b>«Файл»</b> ➔ <b>«Сохранить»</b>.</li>
+                                </ol>
+                                <p style="margin: 0 0 6px 0; color: #0f172a;"><b>Способ 3: Если файл скрипта не скачивается</b></p>
+                                <ol style="margin: 0; padding-left: 20px;">
+                                    <li style="margin-bottom: 4px;">Перейдите по <a href="${GITHUB_REPO_URL}" target="_blank" style="color: #2563eb; text-decoration: underline;">этой ссылке</a> в репозиторий GitHub.</li>
+                                    <li style="margin-bottom: 4px;">Скопируйте весь код скрипта.</li>
+                                    <li>Затем выполните действия из Способа 2, чтобы перенести этот код в Tampermonkey (начиная с пункта 2).</li>
+                                </ol>
+                            </div>
+                        </details>
+                    </div>
+                    <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px; background: #fff;">
+                        <button id="ps-btn-check" class="ps-btn ps-btn-blue">Я обновил скрипт, проверить</button>
+                        <button id="ps-btn-back" class="ps-btn ps-btn-gray">Назад</button>
+                    </div>
+                `;
+            }
+            // ЭКРАН 3: УСПЕХ
+            else if (type === 'success') {
+                html += `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; text-align: center;">
+                        <div style="width: 64px; height: 64px; background: #dcfce7; color: #16a34a; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="12" cy="12" r="10" fill="#10B981"/>
+  <path d="M8.5 12.5L11 15L15.5 9.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
 
-            // Обработчики кнопок
-            overlay.querySelector('#addon-btn-update').onclick = () => {
-                window.open(url, '_blank');
-                localStorage.setItem('addon_update_time_v3', new Date().getTime() + CHECK_INTERVAL);
-                overlay.remove();
-            };
+                        </div>
+                        <h3 style="margin: 0 0 12px 0; font-size: 18px; font-weight: 600; color: #0f172a;">Обновление успешно завершено!</h3>
+                        <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.5;">Скрипт обновлен до версии <b style="color: #16a34a;">v${currVer}</b><br>Приятной работы!</p>
+                    </div>
+                    <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; background: #fff;">
+                        <button id="ps-btn-close" class="ps-btn ps-btn-blue">Продолжить</button>
+                    </div>
+                `;
+            }
+            // ЭКРАН 4: ОШИБКА
+            else if (type === 'fail') {
+                html += `
+                    <div style="display: flex; align-items: center; gap: 14px; padding: 20px 24px; border-bottom: 1px solid #e2e8f0;">
+                        <div style="width: 44px; height: 44px; background: #fee2e2; color: #dc2626; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                        </div>
+                        <div>
+                            <h3 style="margin: 0 0 4px 0; font-size: 16px; font-weight: 600; color: #0f172a;">Обновление не применилось</h3>
+                            <div style="font-size: 13px; color: #dc2626; font-weight: 500;">Текущая версия скрипта: v${currVer}</div>
+                        </div>
+                    </div>
+                    <div class="ps-modal-content">
+                        <p style="margin: 0 0 10px 0; font-size: 13px; color: #334155; line-height: 1.5;">Возможно, вы забыли нажать кнопку «Обновить» или «Перезаписать» во вкладке установки скриптов Tampermonkey.</p>
+                        <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.5;">Если вкладка не открылась и скрипт устанавливается способами 2 или 3, убедитесь, что вы не забыли вставить новый код в редактор и нажали кнопку «Сохранить».</p>
+                    </div>
+                    <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px; background: #fff;">
+                        <button id="ps-btn-retry" class="ps-btn ps-btn-blue">Проверить повторно</button>
+                        <button id="ps-btn-back" class="ps-btn ps-btn-gray">Назад</button>
+                    </div>
+                `;
+            }
 
-            overlay.querySelector('#addon-btn-remind').onclick = () => {
-                localStorage.setItem('addon_update_time_v3', new Date().getTime() + REMIND_LATER);
-                overlay.remove();
-            };
+            html += `</div>`;
+            overlay.innerHTML = html;
 
-            overlay.querySelector('#addon-btn-skip').onclick = () => {
-                localStorage.setItem('addon_skip_version_v3', newVer);
-                localStorage.setItem('addon_update_time_v3', new Date().getTime() + CHECK_INTERVAL);
-                overlay.remove();
-            };
+            // ==========================================
+            // ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ КНОПОК
+            // ==========================================
+            if (type === 'primary') {
+                const btnSkip = overlay.querySelector('#ps-btn-skip');
+                let count = 10;
+
+                skipTimerInterval = setInterval(() => {
+                    count--;
+                    if (count <= 0) {
+                        clearInterval(skipTimerInterval);
+                        btnSkip.disabled = false;
+                        btnSkip.textContent = 'Пропустить версию';
+                    } else {
+                        btnSkip.textContent = `Пропустить версию (${count})`;
+                    }
+                }, 1000);
+
+                overlay.querySelector('#ps-btn-install').onclick = () => {
+                    clearInterval(skipTimerInterval);
+                    localStorage.setItem(STATE_KEY, 'PENDING');
+                    window.open(url, '_blank');
+                    showModal('waiting', currVer, targetVer, changelog, url);
+                };
+
+                overlay.querySelector('#ps-btn-later').onclick = () => {
+                    clearInterval(skipTimerInterval);
+                    localStorage.setItem(NEXT_KEY, Date.now() + REMIND_LATER);
+                    overlay.remove();
+                };
+
+                btnSkip.onclick = () => {
+                    clearInterval(skipTimerInterval);
+                    localStorage.setItem(SKIP_KEY, targetVer);
+                    localStorage.setItem(NEXT_KEY, Date.now() + CHECK_INTERVAL);
+                    overlay.remove();
+                };
+            }
+
+            if (type === 'waiting') {
+                // Если юзер нажал "Проверить", просто релоадим. Скрипт запустится заново и сам увидит стейт PENDING
+                overlay.querySelector('#ps-btn-check').onclick = () => location.reload();
+
+                // Если юзер нажал "Назад", откатываем стейт до IDLE и показываем первичное окно
+                overlay.querySelector('#ps-btn-back').onclick = () => {
+                    localStorage.setItem(STATE_KEY, 'IDLE');
+                    // Чтобы при релоаде модалка не пропадала, обнуляем nextCheck
+                    localStorage.setItem(NEXT_KEY, '0');
+                    showModal('primary', currVer, targetVer, changelog, url);
+                };
+            }
+
+            if (type === 'success') {
+                overlay.querySelector('#ps-btn-close').onclick = () => {
+                    localStorage.setItem(STATE_KEY, 'IDLE');
+                    overlay.remove();
+                };
+            }
+
+            if (type === 'fail') {
+                // Если юзер нажал "Проверить повторно", просто релоадим. Стейт FAILED сохранится и проверит версию.
+                overlay.querySelector('#ps-btn-retry').onclick = () => location.reload();
+
+                // Если "Назад" - откатываем стейт до IDLE и показываем первичное окно
+                overlay.querySelector('#ps-btn-back').onclick = () => {
+                    localStorage.setItem(STATE_KEY, 'IDLE');
+                    localStorage.setItem(NEXT_KEY, '0');
+                    showModal('primary', currVer, targetVer, changelog, url);
+                };
+            }
         }
     }
 
