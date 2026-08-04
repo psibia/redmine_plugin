@@ -5493,8 +5493,7 @@ function openFiltersModal() {
         applyCustomBackground();
         initUI();
 
-        injectNewCardCSS(); // НОВАЯ СТРОКА: загружаем стили для новой карточки
-
+        injectNewCardCSS(); 
         // СНАЧАЛА подготавливаем все карточки
         applyEnhancements();
         injectDynamicPriorityStyles();
