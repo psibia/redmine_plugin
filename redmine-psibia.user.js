@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.7
+// @version      1.3.8
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @changelog 🚀 Добавлена новая система автообновлений\n<div style="text-align: center; margin: 6px 0; color: #64748b;">~~ \_o&lt; ~~</div>\nтеперь обновления будут приходить автоматически
+// @changelog 🚀 Добавлена новая система автообновлений
 // @grant        none
 // ==/UserScript==
 
@@ -5120,12 +5120,12 @@ function openFiltersModal() {
 
         // --- НАСТРОЙКИ ВРЕМЕНИ ---
         // 🔴 ТЕСТОВЫЙ РЕЖИМ (5 секунд проверка, 10 секунд на "пропустить")
-        const CHECK_INTERVAL = 5000;
-        const REMIND_LATER = 10000;
+        //const CHECK_INTERVAL = 5000;
+        //const REMIND_LATER = 10000;
 
         // 🟢 БОЕВОЙ РЕЖИМ
-        //const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
-        //const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
+        const CHECK_INTERVAL = 60 * 60 * 1000;    // 60 минут
+        const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
         // -------------------------
 
         const currentVersion = typeof GM_info !== 'undefined' ? GM_info.script.version : '*.*.*';
@@ -5135,6 +5135,9 @@ function openFiltersModal() {
         const CHANGELOG_KEY = 'psibia_upd_changelog';
         const NEXT_KEY = 'psibia_upd_next';
         const SKIP_KEY = 'psibia_upd_skip';
+
+        const TIMEOUT_KEY = 'psibia_upd_timeout';
+        const STATE_TIMEOUT = 5 * 60 * 1000; // 5 минут
 
         let state = localStorage.getItem(STATE_KEY) || 'IDLE';
         let targetVer = localStorage.getItem(TARGET_KEY) || '';
@@ -5146,10 +5149,30 @@ function openFiltersModal() {
         // ЭТАП 1: ПРОВЕРКА СОСТОЯНИЙ ПРИ ЗАГРУЗКЕ
         // ==========================================
 
+
+        // --- СБРОС ЗАВИСШИХ СОСТОЯНИЙ (ТАЙМАУТ) ---
+        if (state === 'PENDING' || state === 'FAILED') {
+            const timeout = parseInt(localStorage.getItem(TIMEOUT_KEY) || '0', 10);
+
+            // Если таймер установлен и текущее время его превысило
+            if (timeout > 0 && Date.now() > timeout) {
+                state = 'IDLE'; // Меняем переменную в текущем скрипте, чтобы он пошел дальше искать обновы
+                localStorage.setItem(STATE_KEY, 'IDLE'); // Сбрасываем в памяти
+                localStorage.removeItem(TIMEOUT_KEY); // Убиваем таймер
+                localStorage.setItem(NEXT_KEY, '0'); // Обнуляем nextCheck, чтобы первичное окно вылезло сразу
+            } else {
+                // Если юзер обновил страницу до истечения 5 минут, продлеваем таймер еще на 5 минут
+                localStorage.setItem(TIMEOUT_KEY, Date.now() + STATE_TIMEOUT);
+            }
+        }
+
+
+
         if (state === 'PENDING') {
             // Юзер перезагрузил страницу или нажал "Проверить" во время ожидания
             if (compareVersions(currentVersion, targetVer) >= 0) {
                 localStorage.setItem(STATE_KEY, 'SUCCESS');
+                localStorage.removeItem(TIMEOUT_KEY);
                 showModal('success', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
             } else {
                 localStorage.setItem(STATE_KEY, 'FAILED');
@@ -5162,6 +5185,7 @@ function openFiltersModal() {
             // Если юзер перезагрузил страницу на экране ошибки
             if (compareVersions(currentVersion, targetVer) >= 0) {
                 localStorage.setItem(STATE_KEY, 'SUCCESS');
+                localStorage.removeItem(TIMEOUT_KEY);
                 showModal('success', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
             } else {
                 showModal('fail', currentVersion, targetVer, savedChangelog, SCRIPT_URL);
@@ -5408,6 +5432,7 @@ function openFiltersModal() {
                 overlay.querySelector('#ps-btn-install').onclick = () => {
                     clearInterval(skipTimerInterval);
                     localStorage.setItem(STATE_KEY, 'PENDING');
+                    localStorage.setItem(TIMEOUT_KEY, Date.now() + STATE_TIMEOUT);
                     window.open(url, '_blank');
                     showModal('waiting', currVer, targetVer, changelog, url);
                 };
@@ -5433,6 +5458,7 @@ function openFiltersModal() {
                 // Если юзер нажал "Назад", откатываем стейт до IDLE и показываем первичное окно
                 overlay.querySelector('#ps-btn-back').onclick = () => {
                     localStorage.setItem(STATE_KEY, 'IDLE');
+                    localStorage.removeItem(TIMEOUT_KEY);
                     // Чтобы при релоаде модалка не пропадала, обнуляем nextCheck
                     localStorage.setItem(NEXT_KEY, '0');
                     showModal('primary', currVer, targetVer, changelog, url);
@@ -5453,6 +5479,7 @@ function openFiltersModal() {
                 // Если "Назад" - откатываем стейт до IDLE и показываем первичное окно
                 overlay.querySelector('#ps-btn-back').onclick = () => {
                     localStorage.setItem(STATE_KEY, 'IDLE');
+                    localStorage.removeItem(TIMEOUT_KEY);
                     localStorage.setItem(NEXT_KEY, '0');
                     showModal('primary', currVer, targetVer, changelog, url);
                 };
