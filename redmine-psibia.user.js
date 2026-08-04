@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.6
+// @version      1.3.7
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @changelog    🚀 Добавлена новая безотказная система автообновлений.\n✨ Теперь обновления будут приходить автоматически
+// @changelog 🚀 Добавлена новая система автообновлений\n<div style="text-align: center; margin: 6px 0; color: #64748b;">~~ \_o&lt; ~~</div>\nтеперь обновления будут приходить автоматически
 // @grant        none
 // ==/UserScript==
 
@@ -5120,12 +5120,12 @@ function openFiltersModal() {
 
         // --- НАСТРОЙКИ ВРЕМЕНИ ---
         // 🔴 ТЕСТОВЫЙ РЕЖИМ (5 секунд проверка, 10 секунд на "пропустить")
-        //const CHECK_INTERVAL = 5000;
-        //const REMIND_LATER = 10000;
+        const CHECK_INTERVAL = 5000;
+        const REMIND_LATER = 10000;
 
         // 🟢 БОЕВОЙ РЕЖИМ
-        const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
-        const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
+        //const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
+        //const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
         // -------------------------
 
         const currentVersion = typeof GM_info !== 'undefined' ? GM_info.script.version : '*.*.*';
