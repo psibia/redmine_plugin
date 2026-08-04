@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.3
+// @version      1.3.4
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @updateURL    https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.js
-// @downloadURL  https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.js
+// @changelog    - Добавлена новая система получения и установки обновлений\n- Оптимизировано отображение подзадач и связанных задач
 // @grant        none
 // ==/UserScript==
 
@@ -14,7 +13,7 @@
     'use strict';
 
     // =================================================================================
-    // ЧАСТЬ 1: UI, МОДАЛЬНОЕ ОКНО И ЛОГИКА (проверка обновления)
+    // ЧАСТЬ 1: UI, МОДАЛЬНОЕ ОКНО И ЛОГИКА
     // =================================================================================
 
     const deadlineRegex = /(Deadline:|до)\s*(\d{2})\.(\d{2})\.(\d{4})/i; // регулярка для поиска дедлайна или срока завершения в карточках на доске, надо протестить, но вроде формат всегда такой
@@ -74,6 +73,44 @@
                 window.renderFiltersDropdownView(window.currentDropdownView);
             }
         }
+    };
+
+
+    // =================================================================================
+    // ГЛОБАЛЬНАЯ ФУНКЦИЯ ДЛЯ ИКОНОК ТРЕКЕРОВ
+    // =================================================================================
+    window.getSharedTrackerIcon = function(trackerText) {
+        if (!trackerText) return '';
+        const text = trackerText.toLowerCase();
+
+        // Базовый шаблон SVG с нужным выравниванием, чтобы он стоял ровно в строке текста
+        const svgStart = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: text-bottom; margin-right: 4px; display: inline-block;"';
+
+        if (text.includes('баг') || text.includes('инцидент') || text.includes('ошибка'))
+            return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: text-bottom; margin-right: 4px; display: inline-block;"><rect width="24" height="24" rx="4" fill="#f05232"/><circle cx="12" cy="12" r="5" fill="#ffffff"/></svg>';
+
+        if (text.includes('структур'))
+            return `${svgStart} stroke="#a855f7" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
+
+        if (text.includes('разработ'))
+            return `${svgStart} stroke="#94a3b8" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+
+        if (text.includes('аналитик'))
+            return `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14a6 6 0 1 0-6 0v4h6v-4Z"/></svg>`;
+
+        if (text.includes('сопровожд') || text.includes('тп'))
+            return `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`;
+
+        if (text.includes('выч.мощност') || text.includes('выделен'))
+            return `${svgStart} stroke="#94a3b8" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`;
+
+        if (text.includes('типов'))
+            return `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+
+        if (text.includes('коммуникац'))
+            return `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+
+        return `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>`;
     };
 
     window.isAddonFullscreen = false; //сразу тут пишу, тк. связано с верхнем летом
@@ -1113,14 +1150,22 @@
         'priority-4': '#ea580c', 'priority-5': '#dc2626', 'priority-default': '#3b82f6'
     };
 
-    //тупо накидываем стиля на подзадачи и связанные задачи
     function injectTableStyles() {
         if (document.getElementById('addon-table-styles')) return;
         const style = document.createElement('style');
         style.id = 'addon-table-styles';
         style.textContent = `
+            /* Подключаем шрифт напрямую через скрипт */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
             #issue_tree table.list.issues,
             #relations table.list.issues { display: none !important; }
+
+            /* Точечно применяем шрифт ТОЛЬКО к нашему блоку и всем его дочерним элементам */
+            .addon-compact-list,
+            .addon-compact-list * {
+                font-family: 'Inter', sans-serif !important;
+            }
 
             .addon-compact-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; margin-top: 5px; }
 
@@ -1151,11 +1196,6 @@
             .tag-blockiruet {
                 background-color: #ffffff !important; color: #334155 !important; border-color: #f97316 !important; border-width: 1px !important; border-style: solid !important;
             }
-
-            .addon-icon { width: 14px; height: 14px; flex-shrink: 0; margin-right: 6px; margin-left: 2px; stroke-width: 2.5; }
-            .icon-green { color: #16a34a; }
-            .icon-red   { color: #dc2626; fill: #dc2626; border: none; }
-            .icon-orange { color: #ea580c; }
 
             .addon-main-info { flex-grow: 1; display: flex; align-items: center; gap: 4px; overflow: hidden; cursor: default; padding: 6px 0; padding-left: 10px; }
 
@@ -1203,294 +1243,622 @@
             .addon-actions { display: flex; align-items: center; padding: 6px 0; }
             .addon-actions a { color: #cbd5e1; text-decoration: none; font-size: 16px; line-height: 1; display: flex; align-items: center; transition: color 0.2s; cursor: pointer; }
             .addon-actions a:hover { color: #ef4444; }
+
+            /* --- СТИЛИ ДЛЯ ЛИНИЙ (Reddit style) --- */
+            .addon-tree-lines { position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; z-index: 1; }
+            .tree-line-transit { position: absolute; top: -5px; bottom: -5px; border-left: 2px solid #cbd5e1; transition: bottom 0.2s; }
+            .tree-line-l { position: absolute; top: -5px; height: 21px; width: 13px; border-left: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; border-bottom-left-radius: 6px; }
+            .tree-line-t-vert { position: absolute; top: -5px; bottom: -5px; border-left: 2px solid #cbd5e1; transition: bottom 0.2s; }
+            .tree-line-t-horiz { position: absolute; top: 16px; width: 13px; border-top: 2px solid #cbd5e1; }
+
+            /* --- ОТСТУПЫ ПРИ СМЕНЕ УРОВНЯ ВЛОЖЕННОСТИ --- */
+            .addon-tree-row.extra-gap { margin-top: 5px; }
+            .addon-tree-row.extra-gap .tree-line-transit,
+            .addon-tree-row.extra-gap .tree-line-l,
+            .addon-tree-row.extra-gap .tree-line-t-vert { top: -10px; }
+            .addon-tree-row.extra-gap .tree-line-l { height: 26px; }
         `;
         document.head.appendChild(style);
     }
 
-   function parseAndTransformTable(containerId, listId) {
+
+
+    function parseAndTransformTable(containerId, listId) {
+
         const container = document.getElementById(containerId);
+
         if (!container) return;
+
         const table = container.querySelector('table.list.issues');
+
         if (!table) return;
 
+
+
         let list = document.getElementById(listId);
+
         if (list) list.remove();
 
+
+
         const releaseBlockId = listId + '-release-wrapper';
+
         let releaseBlock = document.getElementById(releaseBlockId);
+
         if (releaseBlock) releaseBlock.remove();
 
+
+
         list = document.createElement('div');
+
         list.id = listId;
+
         list.className = 'addon-compact-list';
+
+
 
         let releaseListContainer = null;
 
+
+
         const rows = table.querySelectorAll('tr.issue');
+
         if (rows.length === 0) return;
 
+
+
         let hasBlocker = false;
+
         let hasReleases = false;
 
+
+
         const KNOWN_RELATIONS = ['связана с', 'блокируется', 'блокирует', 'дублируется', 'дублирует', 'следующая', 'предыдущая', 'скопирована с', 'скопирована в'];
+
         const releaseRegex = /^Релиз\s+\d+\.\d+\.\d+/i;
 
-        // 1. Считываем данные и уровни вложенности (idnt-X)
+
+
         const rowsData = Array.from(rows).map(row => {
+
             let level = 0;
+
             const idntMatch = row.className.match(/idnt-(\d+)/);
+
             if (idntMatch) level = parseInt(idntMatch[1], 10);
+
             return { row, level };
+
         });
 
-        // 2. Логика для отрисовки веток "а-ля Reddit"
+
+
         for (let i = 0; i < rowsData.length; i++) {
+
             const currentLevel = rowsData[i].level;
+
             const lines = [];
+
             let hasSiblingBelow = false;
 
+
+
             for (let lvl = 1; lvl <= currentLevel; lvl++) {
+
                 if (lvl === currentLevel) {
-                    // Проверяем, есть ли ниже сиблинги того же уровня в этой же ветке
+
                     for (let j = i + 1; j < rowsData.length; j++) {
-                        if (rowsData[j].level < currentLevel) break; // Вышли из ветки родителя
+
+                        if (rowsData[j].level < currentLevel) break;
+
                         if (rowsData[j].level === currentLevel) {
+
                             hasSiblingBelow = true;
+
                             break;
+
                         }
+
                     }
-                    lines.push(lvl); // Линию к самой себе мы рисуем всегда
+
+                    lines.push(lvl);
+
                 } else {
-                    // Проверяем, нужно ли тянуть транзитную вертикальную линию вниз (если у родителя есть еще дети ниже нас)
+
                     let hasParentSiblingBelow = false;
+
                     for (let j = i + 1; j < rowsData.length; j++) {
-                        if (rowsData[j].level < lvl) break; // Вышли из ветки прародителя
+
+                        if (rowsData[j].level < lvl) break;
+
                         if (rowsData[j].level === lvl) {
+
                             hasParentSiblingBelow = true;
+
                             break;
+
                         }
+
                     }
+
                     if (hasParentSiblingBelow) {
+
                         lines.push(lvl);
+
                     }
+
                 }
+
             }
+
             rowsData[i].hasSiblingBelow = hasSiblingBelow;
+
             rowsData[i].lines = lines;
+
         }
 
-        const STEP = 26; // Отступ (в пикселях) на каждый уровень вложенности
 
-        // 3. Формируем карточки
-        rowsData.forEach(({ row, level, lines, hasSiblingBelow }) => {
+
+        const STEP = 26;
+
+
+
+        rowsData.forEach(({ row, level, lines, hasSiblingBelow }, index) => {
+
             const subjectLink = row.querySelector('.subject a');
+
             const href = subjectLink ? subjectLink.href : '#';
-            const trackerAndId = subjectLink ? subjectLink.textContent : ('#' + row.id.replace(/\D/g, ''));
+
+
+
+            // Сохраняем исходную строку с трекером и ID
+
+            const originalTrackerAndId = subjectLink ? subjectLink.textContent : ('#' + row.id.replace(/\D/g, ''));
+
+
 
             let statusEl = row.querySelector('.status');
+
             if (!statusEl || !statusEl.textContent.trim()) {
+
                 statusEl = row.querySelector('.value span');
+
             }
+
             const status = statusEl ? statusEl.textContent.trim() : '';
+
             const s = status.toLowerCase();
+
             const assignee = row.querySelector('.assigned_to a')?.textContent || '—';
+
             const isResolved = ['решена', 'выполнена', 'отменена', 'закрыта'].some(k => s.includes(k));
+
             const unlinkBtn = row.querySelector('.buttons a[data-method="delete"]');
 
+
+
             let relationTag = '';
+
             let subjectTopic = '';
 
+
+
             if (subjectLink) {
+
                 if (subjectLink.previousSibling && subjectLink.previousSibling.nodeType === 3) {
+
                     const preText = subjectLink.previousSibling.textContent.trim();
+
                     for (const rel of KNOWN_RELATIONS) {
+
                         if (preText.toLowerCase().includes(rel)) { relationTag = rel; break; }
+
                     }
+
                 } else if (containerId === 'relations') {
+
                     const cellText = row.querySelector('.subject').textContent.trim();
+
                     for (const rel of KNOWN_RELATIONS) {
+
                         if (cellText.toLowerCase().startsWith(rel)) { relationTag = rel; break; }
+
                     }
+
                 }
+
                 if (subjectLink.nextSibling && subjectLink.nextSibling.nodeType === 3) {
+
                     subjectTopic = subjectLink.nextSibling.textContent.replace(/^[:\-]\s*/, '').trim();
+
                 }
+
             }
 
-            const fullSummary = `${trackerAndId} ${subjectTopic}`;
 
-            // Логика выделения релизов
+
             if (containerId === 'relations' && releaseRegex.test(subjectTopic)) {
+
                 hasReleases = true;
+
                 if (!releaseListContainer) {
+
                     releaseListContainer = document.createElement('div');
+
                     releaseListContainer.id = releaseBlockId;
+
                     releaseListContainer.innerHTML = `<p><strong>Релиз</strong></p>`;
+
                     const innerList = document.createElement('div');
+
                     innerList.className = 'addon-compact-list';
+
                     releaseListContainer.appendChild(innerList);
+
                 }
+
+
 
                 let relStatusClass = 'st-step-1';
+
                 if (['уточнение','пауз', 'ожидан', 'отложена'].some(k => s.includes(k))) relStatusClass = 'st-warn';
+
                 else if (['закр', 'отмен', 'не актуально'].some(k => s.includes(k))) relStatusClass = 'st-closed';
+
                 else if (['решена'].some(k => s.includes(k))) relStatusClass = 'st-step-8';
+
                 else if (['релиз', 'ожидает установки', 'выполнена'].some(k => s.includes(k))) relStatusClass = 'st-step-7';
+
                 else if (['протестирована'].some(k => s.includes(k))) relStatusClass = 'st-step-6';
+
                 else if (['ревью', 'review'].some(k => s.includes(k))) relStatusClass = 'st-step-5';
+
                 else if (['тестирование', 'тест'].some(k => s.includes(k))) relStatusClass = 'st-step-4';
+
                 else if (['готова к разраб', 'разработка', 'доработ', 'dev'].some(k => s.includes(k))) relStatusClass = 'st-step-3';
+
                 else if (['в работе', 'работ'].some(k => s.includes(k))) relStatusClass = 'st-step-2';
 
+
+
                 const relCard = document.createElement('div');
+
                 relCard.className = 'addon-compact-card';
+
                 relCard.style.borderLeft = '4px solid #3b82f6';
+
                 relCard.innerHTML = `
+
                     <div class="addon-main-info">
+
                         <a href="${href}" class="addon-summary" title="${subjectTopic}">${subjectTopic}</a>
+
                     </div>
+
                     <div class="addon-meta">
+
                         <span class="addon-user" title="${assignee}">${assignee}</span>
+
                         <span class="addon-status ${relStatusClass}">${status}</span>
+
                     </div>
+
                     ${unlinkBtn ? `<div class="addon-actions"><a href="${unlinkBtn.href}" data-remote="true" data-method="delete" data-confirm="Разорвать связь?" title="Удалить связь">×</a></div>` : ''}
+
                 `;
+
                 relCard.querySelector('.addon-summary').addEventListener('click', (e) => {
+
                     if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+
                     if (window.self !== window.top) { e.preventDefault(); openModal(href, relCard); }
+
                 });
+
+
 
                 releaseListContainer.children[1].appendChild(relCard);
+
                 return;
+
             }
+
+
+
+            // =========================================================================
+
+            // ВЫКУСЫВАЕМ ИКОНКИ (Разбор Трекера и ID, замена текстового трекера на иконку)
+
+            // =========================================================================
+
+            let trackerName = '';
+
+            let taskId = originalTrackerAndId;
+
+
+
+            // Выкусываем Трекер (например "Аналитика") и ID (например "#192873")
+
+            const matchId = originalTrackerAndId.match(/^(.*?)\s+(#\d+)$/);
+
+            if (matchId) {
+
+                trackerName = matchId[1].trim();
+
+                taskId = matchId[2];
+
+            }
+
+
+
+            // Получаем нужную иконку через глобальную функцию
+
+            const trackerSvg = window.getSharedTrackerIcon(trackerName);
+
+
+
+            // Формируем чистый текст для тултипа при наведении
+
+            const plainTextSummary = `${originalTrackerAndId} ${subjectTopic}`.trim();
+
+            // Собираем итоговое красивое название: Иконка + обычный номер + текст задачи
+
+            const htmlSummary = `<span style="font-weight: 500; color: #475569; margin-right: 4px;">${trackerSvg} ${taskId}</span> ${subjectTopic}`;
+
+            // =========================================================================
+
+
 
             let tagColorClass = '';
+
             const relLower = relationTag.toLowerCase().trim();
 
+
+
             if (relLower === 'блокируется') {
+
                 if (!isResolved) { relationTag = 'блокируется задачей'; hasBlocker = true; tagColorClass = 'tag-blocking'; }
+
             } else if (relLower === 'блокирует') {
+
                 if (!isResolved) { relationTag = 'блокирует задачу'; tagColorClass = 'tag-blockiruet'; }
+
             }
+
             if (relationTag.includes('блокируется задачей') && !isResolved) tagColorClass = 'tag-blocking';
 
+
+
             const dueDate = row.querySelector('.due_date')?.textContent || '';
+
             let dateHtml = '';
+
             if (dueDate) {
+
                 let badgeClass = 'date-normal';
+
                 if (!isResolved) {
+
                     const parts = dueDate.split('.');
+
                     if (parts.length === 3) {
+
                         const dueObj = new Date(parts[2], parts[1] - 1, parts[0]);
+
                         const now = new Date(); now.setHours(0, 0, 0, 0);
+
                         const diffDays = Math.ceil((dueObj - now) / (1000 * 60 * 60 * 24));
+
                         if (diffDays < 0) badgeClass = 'date-over-filled';
+
                         else if (diffDays <= 3) badgeClass = 'date-warn-filled';
+
                     }
+
                 }
+
                 dateHtml = `<span class="addon-date-badge ${badgeClass}" title="Срок завершения">до ${dueDate}</span>`;
+
             } else {
+
                 dateHtml = `<span class="addon-date-badge date-empty-badge" title="Срок не указан">не задано</span>`;
+
             }
 
-            let iconHtml = '';
+
+
+
             let cardClass = 'addon-compact-card';
+
             let statusClass = 'st-step-1';
 
+
+
             if (['уточнение','пауз', 'ожидан', 'отложена'].some(k => s.includes(k))) statusClass = 'st-warn';
+
             else if (['закр', 'отмен', 'не актуально'].some(k => s.includes(k))) statusClass = 'st-closed';
+
             else if (['решена'].some(k => s.includes(k))) statusClass = 'st-step-8';
+
             else if (['релиз', 'ожидает установки', 'выполнена'].some(k => s.includes(k))) statusClass = 'st-step-7';
+
             else if (['протестирована'].some(k => s.includes(k))) statusClass = 'st-step-6';
+
             else if (['ревью', 'review'].some(k => s.includes(k))) statusClass = 'st-step-5';
+
             else if (['тестирование', 'тест'].some(k => s.includes(k))) statusClass = 'st-step-4';
+
             else if (['готова к разраб', 'разработка', 'доработ', 'dev'].some(k => s.includes(k))) statusClass = 'st-step-3';
+
             else if (['в работе', 'работ'].some(k => s.includes(k))) statusClass = 'st-step-2';
 
-            if ((['уточнение', 'ожидан', 'пауз', 'отложен'].some(k => s.includes(k)))) {
-                iconHtml = `<svg class="addon-icon icon-orange" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
-            }
+
+
+
             if (['закр', 'отмен', 'не актуально', 'решена', 'выполнена'].some(k => s.includes(k))) {
+
                 cardClass += ' card-dimmed';
+
             }
 
-            // Генерируем HTML для отрисовки веток
+
+
             let treeHtml = '';
+
             if (level > 0) {
-                // z-index: 1 и top: -5px (чтобы линия проходила сквозь зазор margin в 5px между карточками)
-                treeHtml = `<div class="addon-tree-lines" style="position: absolute; left: 0; top: -5px; bottom: 0; width: ${level * STEP}px; pointer-events: none; z-index: 1;">`;
+
+                treeHtml = `<div class="addon-tree-lines" style="position: absolute; left: 0; top: -10px; bottom: 0; width: ${level * STEP}px; pointer-events: none; z-index: 1;">`;
+
+
 
                 lines.forEach(lvl => {
-                    const leftPos = lvl * STEP - (STEP / 2); // Рисуем ровно по центру отступа
+
+                    const leftPos = lvl * STEP - (STEP / 2);
+
+
 
                     if (lvl === level) {
+
                         if (!hasSiblingBelow) {
-                            // Последняя карточка в ветке (рисуем красивый уголок "L")
-                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; height: calc(50% + 2.5px); width: ${STEP / 2}px; border-left: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; border-bottom-left-radius: 6px;"></div>`;
+
+                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; height: calc(50% + 2.5px); width: ${STEP / 2}px; border-left: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; border-bottom-left-radius: 6px;"></div>`;
+
                         } else {
-                            // Есть сиблинги ниже (рисуем Т-образный перекресток)
-                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; bottom: 0; border-left: 2px solid #cbd5e1;"></div>`;
-                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: calc(50% + 2.5px); width: ${STEP / 2}px; border-top: 2px solid #cbd5e1;"></div>`;
+
+                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; bottom: 0; border-left: 1px solid #cbd5e1;"></div>`;
+
+                            treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: calc(50% + 2.5px); width: ${STEP / 2}px; border-top: 1px solid #cbd5e1;"></div>`;
+
                         }
+
                     } else {
-                        // Транзитная линия для нижних элементов
-                        treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; bottom: 0; border-left: 2px solid #cbd5e1;"></div>`;
+
+                        treeHtml += `<div style="position: absolute; left: ${leftPos}px; top: 0; bottom: 0; border-left: 1px solid #cbd5e1;"></div>`;
+
                     }
+
                 });
 
+
+
                 treeHtml += `</div>`;
+
             }
 
-            // Обертка ряда (смещаем ее контент с помощью padding-left)
+
+
+            let isLevelChanged = false;
+
+            if (index > 0 && rowsData[index - 1].level !== level) {
+
+                isLevelChanged = true;
+
+            }
+
+
+
             const rowWrapper = document.createElement('div');
-            rowWrapper.className = 'addon-tree-row';
+
+            rowWrapper.className = 'addon-tree-row' + (isLevelChanged ? ' extra-gap' : '');
+
             rowWrapper.style.paddingLeft = `${level * STEP}px`;
 
-            // Сама карточка
+
+
             const card = document.createElement('div');
+
             card.className = cardClass;
+
+
+
+            // Встраиваем htmlSummary и plainTextSummary
+
             card.innerHTML = `
+
                 <div class="addon-main-info">
+
                     ${relationTag ? `<span class="addon-relation-tag ${tagColorClass}">${relationTag}</span>` : ''}
-                    ${iconHtml}
-                    <a href="${href}" class="addon-summary" title="${fullSummary}">${fullSummary}</a>
+
+
+                    <a href="${href}" class="addon-summary" title="${plainTextSummary}">${htmlSummary}</a>
+
                 </div>
+
                 <div class="addon-meta">
+
                     <span class="addon-status ${statusClass}">${status}</span>
+
                     <span class="addon-user" title="${assignee}">${assignee}</span>
+
                     ${dateHtml}
+
                 </div>
+
                 ${unlinkBtn ? `<div class="addon-actions"><a href="${unlinkBtn.href}" data-remote="true" data-method="delete" data-confirm="Разорвать связь?" title="Удалить связь">×</a></div>` : ''}
+
             `;
 
+
+
             card.querySelector('.addon-summary').addEventListener('click', (e) => {
+
                 if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+
                 if (window.self !== window.top) { e.preventDefault(); openModal(href, card); }
+
             });
 
-            // Собираем всё как матрёшку
+
+
             rowWrapper.innerHTML = treeHtml;
+
             rowWrapper.appendChild(card);
+
             list.appendChild(rowWrapper);
+
         });
+
+
 
         table.parentNode.insertBefore(list, table);
 
+
+
         if (releaseListContainer && hasReleases) {
+
             table.parentNode.insertBefore(releaseListContainer, table);
+
         }
 
+
+
         if (containerId === 'relations' && hasBlocker) {
+
             const mainSubjectDiv = document.querySelector('div.subject');
+
             if (mainSubjectDiv && !mainSubjectDiv.querySelector('.tag-blocking')) {
+
                 const blockerBadge = document.createElement('span');
+
                 blockerBadge.className = 'addon-relation-tag tag-blocking';
+
                 blockerBadge.textContent = 'обнаружен блокер';
+
                 blockerBadge.style.marginRight = '10px';
+
                 mainSubjectDiv.prepend(blockerBadge);
+
             }
+
         }
+
     }
+
+
+
+
+
+
     // =================================================================================
     // ЗАПУСК И СЛЕЖЕНИЕ (нельзя вырезать, иначе не будут обновляться изменения своййств)
     // =================================================================================
@@ -4736,6 +5104,213 @@ function openFiltersModal() {
 
 
 
+    // =================================================================================
+    // КАСТОМНЫЙ АВТО-АПДЕЙТЕР
+    // =================================================================================
+    function initAutoUpdater() {
+        const SCRIPT_URL = 'https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.js';
+
+        // --- НАСТРОЙКИ ВРЕМЕНИ (В МИЛЛИСЕКУНДАХ) ---
+
+        //ТЕСТОВЫЙ РЕЖИМ
+        // const CHECK_INTERVAL = 5000;
+        // const REMIND_LATER = 10000;
+
+        //БОЕВОЙ РЕЖИМ
+        const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
+        const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
+
+        // -------------------------------------------
+
+        // Получаем текущую версию скрипта
+        const currentVersion = typeof GM_info !== 'undefined' ? GM_info.script.version : '1.3.2';
+
+        const now = new Date().getTime();
+        // Используем _v3, чтобы игнорировать старые тестовые сохранения в localStorage
+        const nextCheck = parseInt(localStorage.getItem('addon_update_time_v3') || '0', 10);
+        const skippedVersion = localStorage.getItem('addon_skip_version_v3') || '';
+
+        // Если время проверки еще не пришло — выходим
+        if (now < nextCheck) return;
+
+        // Делаем фоновый запрос
+        fetch(SCRIPT_URL + '?t=' + now)
+            .then(response => {
+                if (!response.ok) throw new Error('Network error');
+                return response.text();
+            })
+            .then(text => {
+                // Парсим версию и чейнджлог из ответа
+                const versionMatch = text.match(/@version\s+([\d\.]+)/);
+                const changelogMatch = text.match(/@changelog\s+(.+)/);
+
+                if (!versionMatch) return;
+
+                const newVersion = versionMatch[1];
+                const changelog = changelogMatch ? changelogMatch[1].trim() : 'Описание изменений не добавлено.';
+
+                // Сравниваем версии
+                if (isNewerVersion(currentVersion, newVersion)) {
+                    if (newVersion === skippedVersion) {
+                        // Если версию пропустили, откладываем следующую проверку
+                        localStorage.setItem('addon_update_time_v3', now + CHECK_INTERVAL);
+                        return;
+                    }
+
+                    // Показываем красивую модалку
+                    showUpdateModal(currentVersion, newVersion, changelog, SCRIPT_URL);
+                } else {
+                    // Версия актуальная, спим до следующей проверки
+                    localStorage.setItem('addon_update_time_v3', now + CHECK_INTERVAL);
+                }
+            })
+            .catch(error => console.warn('Ошибка проверки обновлений:', error));
+
+        // Вспомогательная функция для корректного сравнения версий (1.10.0 > 1.2.0)
+        function isNewerVersion(curr, newVer) {
+            const v1 = curr.split('.').map(Number);
+            const v2 = newVer.split('.').map(Number);
+            for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
+                const num1 = v1[i] || 0;
+                const num2 = v2[i] || 0;
+                if (num2 > num1) return true;
+                if (num1 > num2) return false;
+            }
+            return false;
+        }
+
+        // Отрисовка модального окна
+        function showUpdateModal(currVer, newVer, changelog, url) {
+            if (document.getElementById('addon-update-overlay')) return;
+
+            const overlay = document.createElement('div');
+            overlay.id = 'addon-update-overlay';
+            overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.4); z-index: 100000; backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center;';
+
+            const modalHtml = `
+                <style>
+                    #addon-update-modal-box {
+                        background: #fff; width: 450px; border-radius: 12px;
+                        box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+                        display: flex; flex-direction: column;
+                        box-sizing: border-box; overflow: hidden;
+                        font-family: 'Inter', sans-serif !important;
+                    }
+                    #addon-update-modal-box * {
+                        box-sizing: border-box !important;
+                        font-family: 'Inter', sans-serif !important;
+                    }
+
+                    /* Эталонные кнопки */
+                    .addon-upd-btn {
+                        display: inline-flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        gap: 6px !important;
+                        border: 1px solid transparent !important;
+                        border-radius: 6px !important;
+                        font-size: 13px !important;
+                        font-weight: 500 !important;
+                        cursor: pointer !important;
+                        transition: all 0.2s !important;
+                        text-decoration: none !important;
+                    }
+
+                    /* Главная кнопка */
+                    .addon-upd-btn-primary {
+                        background: #2563eb !important;
+                        color: #fff !important;
+                        height: 36px !important;
+                        width: 100% !important;
+                        font-weight: 600 !important;
+                    }
+                    .addon-upd-btn-primary:hover { background: #1d4ed8 !important; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important; }
+
+                    /* Второстепенные кнопки */
+                    .addon-upd-btn-secondary {
+                        background: #f8fafc !important;
+                        color: #475569 !important;
+                        border-color: #cbd5e1 !important;
+                        height: 32px !important;
+                        flex: 1 !important;
+                    }
+                    .addon-upd-btn-secondary:hover { background: #f1f5f9 !important; border-color: #94a3b8 !important; color: #0f172a !important; }
+
+                    .addon-upd-btn-danger {
+                        background: #fee2e2 !important;
+                        color: #dc2626 !important;
+                        height: 32px !important;
+                        flex: 1 !important;
+                    }
+                    .addon-upd-btn-danger:hover { background: #fca5a5 !important; color: #b91c1c !important; }
+                </style>
+
+                <div id="addon-update-modal-box">
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid #e2e8f0;">
+                        <div style="width: 42px; height: 42px; background: #eff6ff; color: #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #0f172a; line-height: 1.2;">Доступно обновление скрипта Redmine</h3>
+                            <div style="font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 6px;">
+                                Текущая: <span style="font-weight: 600; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">v${currVer}</span>
+                                <span style="color: #cbd5e1;">➔</span>
+                                Новая: <span style="font-weight: 600; color: #16a34a; background: #dcfce7; padding: 2px 6px; border-radius: 4px; border: 1px solid #bbf7d0;">v${newVer}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="padding: 20px 24px; background: #f8fafc;">
+                        <h4 style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600; letter-spacing: 0.05em;">Что нового:</h4>
+                        <div style="font-size: 13px; color: #334155; line-height: 1.5; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px;">
+                            ${changelog}
+                        </div>
+                    </div>
+
+                    <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 12px; background: #fff;">
+                        <button id="addon-btn-update" class="addon-upd-btn addon-upd-btn-primary">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Установить обновление
+                        </button>
+                        <div style="display: flex; gap: 12px;">
+                            <button id="addon-btn-remind" class="addon-upd-btn addon-upd-btn-secondary">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                Напомнить позже
+                            </button>
+                            <button id="addon-btn-skip" class="addon-upd-btn addon-upd-btn-danger">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                Пропустить версию
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            overlay.innerHTML = modalHtml;
+            document.body.appendChild(overlay);
+
+            // Обработчики кнопок
+            overlay.querySelector('#addon-btn-update').onclick = () => {
+                window.open(url, '_blank');
+                localStorage.setItem('addon_update_time_v3', new Date().getTime() + CHECK_INTERVAL);
+                overlay.remove();
+            };
+
+            overlay.querySelector('#addon-btn-remind').onclick = () => {
+                localStorage.setItem('addon_update_time_v3', new Date().getTime() + REMIND_LATER);
+                overlay.remove();
+            };
+
+            overlay.querySelector('#addon-btn-skip').onclick = () => {
+                localStorage.setItem('addon_skip_version_v3', newVer);
+                localStorage.setItem('addon_update_time_v3', new Date().getTime() + CHECK_INTERVAL);
+                overlay.remove();
+            };
+        }
+    }
+
+
+
     function runAllLogic() {
         applyCustomBackground();
         initUI();
@@ -4766,6 +5341,10 @@ function openFiltersModal() {
         if (document.getElementById('addon-subtasks-list') || document.getElementById('addon-relations-list')) {
             document.body.classList.add('addon-tables-ready');
         }
+
+
+        // Инициализируем проверку обновлений
+        initAutoUpdater();
     }
 
     runAllLogic();
