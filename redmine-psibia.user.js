@@ -5119,17 +5119,16 @@ function openFiltersModal() {
 
         // --- НАСТРОЙКИ ВРЕМЕНИ ---
         // 🔴 ТЕСТОВЫЙ РЕЖИМ (5 секунд проверка, 10 секунд на "пропустить")
-        //const CHECK_INTERVAL = 5000;
-        //const REMIND_LATER = 10000;
+        const CHECK_INTERVAL = 5000;
+        const REMIND_LATER = 10000;
 
         // 🟢 БОЕВОЙ РЕЖИМ
-        const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
-        const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
+        //const CHECK_INTERVAL = 30 * 60 * 1000;    // 30 минут
+        //const REMIND_LATER = 12 * 60 * 60 * 1000; // 12 часов
         // -------------------------
 
         const currentVersion = typeof GM_info !== 'undefined' ? GM_info.script.version : '*.*.*';
 
-        // Ключи _v10 для чистой работы стейт-машины
         const STATE_KEY = 'psibia_upd_state';
         const TARGET_KEY = 'psibia_upd_target';
         const CHANGELOG_KEY = 'psibia_upd_changelog';
