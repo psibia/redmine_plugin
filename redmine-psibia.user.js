@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.8
+// @version      1.3.9
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @changelog 🚀 Добавлена новая система автообновлений
+// @changelog    - Расширено количество иконок для трекеров задач, которые отображаются в подзадачах и связанных задачах\n- Толщина шрифта номера задачи в связанных задачах изменилась с 500 до 400
 // @grant        none
 // ==/UserScript==
 
@@ -80,38 +80,175 @@
     // ГЛОБАЛЬНАЯ ФУНКЦИЯ ДЛЯ ИКОНОК ТРЕКЕРОВ
     // =================================================================================
     window.getSharedTrackerIcon = function(trackerText) {
-        if (!trackerText) return '';
-        const text = trackerText.toLowerCase();
+    if (!trackerText) return '';
+    const text = trackerText.trim().toLowerCase();
 
-        // Базовый шаблон SVG с нужным выравниванием, чтобы он стоял ровно в строке текста
-        const svgStart = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: text-bottom; margin-right: 4px; display: inline-block;"';
+    const svgStart = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: text-bottom; margin-right: 4px; display: inline-block;"';
 
-        if (text.includes('баг') || text.includes('инцидент') || text.includes('ошибка'))
-            return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: text-bottom; margin-right: 4px; display: inline-block;"><rect width="24" height="24" rx="4" fill="#f05232"/><circle cx="12" cy="12" r="5" fill="#ffffff"/></svg>';
+    // Шаблоны иконок
+    const icons = {
+        // === БАЗОВЫЕ И ТЕХНИЧЕСКИЕ ===
+        bug: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: text-bottom; margin-right: 4px; display: inline-block;"><rect width="24" height="24" rx="4" fill="#f05232"/><circle cx="12" cy="12" r="5" fill="#ffffff"/></svg>',
+        structure: `${svgStart} stroke="#a855f7" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+        dev: `${svgStart} stroke="#94a3b8" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+        new_feature: `${svgStart} stroke="#f59e0b" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`,
+        pilot: `${svgStart} stroke="#10b981" stroke-width="2"><path d="M10 2v7.31L2 20h20L14 9.31V2"/><line x1="8.5" y1="2" x2="15.5" y2="2"/><line x1="6" y1="14" x2="18" y2="14"/></svg>`,
+        analytics: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14a6 6 0 1 0-6 0v4h6v-4Z"/></svg>`,
+        support: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+        server: `${svgStart} stroke="#94a3b8" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`,
+        gear: `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+        message: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
 
-        if (text.includes('структур'))
-            return `${svgStart} stroke="#a855f7" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
+        // === ДЕТАЛИЗИРОВАННЫЕ БИЗНЕС-ПРОЦЕССЫ ===
 
-        if (text.includes('разработ'))
-            return `${svgStart} stroke="#94a3b8" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+        // Папка (Проект в реестре)
+        project_registry: `${svgStart} stroke="#3b82f6" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
 
-        if (text.includes('аналитик'))
-            return `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15 14a6 6 0 1 0-6 0v4h6v-4Z"/></svg>`;
+        // Символ рубля (Серый)
+        budgeting: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M14 11h-4"/><path d="M14 15h-4"/><path d="M10 4v16"/><path d="M10 4h4a4 4 0 0 1 0 8h-4"/></svg>`,
 
-        if (text.includes('сопровожд') || text.includes('тп'))
-            return `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`;
+        // Мишень (Пресейлы)
+        presales: `${svgStart} stroke="#f97316" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
 
-        if (text.includes('выч.мощност') || text.includes('выделен'))
-            return `${svgStart} stroke="#94a3b8" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`;
+        // Экран / Монитор (Демонстрация)
+        demo: `${svgStart} stroke="#0ea5e9" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
 
-        if (text.includes('типов'))
-            return `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+        // График вверх (Выполнение плана продаж)
+        sales_plan: `${svgStart} stroke="#22c55e" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>`,
 
-        if (text.includes('коммуникац'))
-            return `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+        // Калькулятор (Оценка)
+        estimation: `${svgStart} stroke="#8b5cf6" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="8" y2="18"/><line x1="12" y1="18" x2="12" y2="18"/><line x1="16" y1="18" x2="16" y2="18"/></svg>`,
 
-        return `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>`;
+        // Документ с текстом (Подготовка КП / Оценка)
+        prep_kp: `${svgStart} stroke="#6366f1" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+
+        // Чертежное перо (Подготовка ТЗ / Предложения)
+        prep_tz: `${svgStart} stroke="#d946ef" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>`,
+
+        // Тележка стала серой (как типовая задача)
+        procurement: `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>`,
+
+        // для отдела маркетинга папка
+        contractCommercial: `${svgStart} stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8L10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"/><path d="M2 10h20"/></svg>`,
+
+        // Портфель (Сам договор / Заключенный контракт)
+        contract: `${svgStart} stroke="#64748b" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>`,
+
+        // Иерархия / Связи (Субподряд)
+        subcontracting: `${svgStart} stroke="#a855f7" stroke-width="2"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M12 8v3"/></svg>`,
+
+        // === ОСТАЛЬНЫЕ ===
+        marketing: `${svgStart} stroke="#db2777" stroke-width="2"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>`,
+        docs: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
+        rocket: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>`,
+        inbox: `${svgStart} stroke="#94a3b8" stroke-width="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`,
+        travel: `${svgStart} stroke="#94a3b8" stroke-width="2"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21.5 4c0 0-2 .5-3.5 2L14.5 9.5 6.3 7.7c-.5-.1-1 .1-1.3.5l-.8.8 5.7 3.5L5 17l-3-1-1.3 1.3 4 1.7 1.7 4 1.3-1.3-1-3 4.5-4.9 3.5 5.7.8-.8c.4-.3.6-.8.5-1.3z"/></svg>`,
+        decline: `${svgStart} stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+        default: `${svgStart} stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>`
     };
+
+    const categoryMap = {
+        // Баги
+        'баг': 'bug',
+        'инцидент': 'bug',
+        'управление инцидентами': 'bug',
+
+        // Структура
+        'структурная': 'structure',
+        'структурный_test': 'structure',
+        'раздел': 'structure',
+
+        // Разработка
+        'разработка': 'dev',
+        'разработка (new)': 'dev',
+        'разработка эп': 'dev',
+        'разработка продукта': 'dev',
+        'на разработку': 'dev',
+        'рефакторинг': 'dev',
+
+        // Новая функциональность
+        'новая функциональность': 'new_feature',
+
+        // Аналитика
+        'аналитика': 'analytics',
+        'аналитика (new)': 'analytics',
+        'аналитика продукта': 'analytics',
+
+        // Сопровождение
+        'сопровождение': 'support',
+        'сопровождение эо': 'support',
+        'сопровождение вд | медицина': 'support',
+        'сопровождение (new)': 'support',
+        'запрос на обслуживание': 'support',
+        'консультация': 'support',
+        'на консультацию': 'support',
+        'прием обращений': 'support',
+        'прием обращений смп': 'support',
+
+        // Вычислительные мощности
+        'выделение выч.мощности': 'server',
+
+        // Коммуникации
+        'коммуникации': 'message',
+        'входящее письмо': 'message',
+        'общение': 'message',
+
+        // Типовые задачи
+        'типовая задача': 'gear',
+        'типовая задача гис ээ': 'gear',
+        'стандартная': 'gear',
+        'запрос на доработку ис': 'gear',
+        'ртк': 'gear',
+
+        // Воронка продаж
+        'проект в реестре': 'project_registry',
+        'бюджетирование': 'budgeting',
+        'пресейлы': 'presales',
+        'демонстрация': 'demo',
+        'выполнение плана продаж': 'sales_plan',
+        'оценка': 'estimation',
+        'подготовка кп/ оценка': 'prep_kp',
+        'подготовка тз/ предложения': 'prep_tz',
+        'закупка': 'procurement',
+        'согласование договора': 'contractCommercial',
+        'договор': 'contract',
+        'субподряд': 'subcontracting',
+
+        // Маркетинг
+        'маркетинг и pr': 'marketing',
+
+        // Документы и база знаний
+        'документы': 'docs',
+        'ведение wiki': 'docs',
+        'документация': 'docs',
+        'бз': 'docs',
+        'запрос на создание статьи': 'docs',
+        'запрос на обновление статьи': 'docs',
+        'запрос на проверку статьи': 'docs',
+
+        // Релизы и пилоты
+        'релиз': 'rocket',
+        'выпуск релиза': 'rocket',
+        'пилот': 'pilot',
+
+        // Бэклог
+        'бэклог': 'inbox',
+        'бэклог смэв': 'inbox',
+        'бэклог вку': 'inbox',
+        'к распределению': 'inbox',
+
+        // Отпуска / Командировки
+        'отпуск': 'travel',
+        'командировка': 'travel',
+
+        // Отказы
+        'отказ': 'decline'
+    };
+
+    const iconKey = categoryMap[text] || 'default';
+    return icons[iconKey];
+};
+
 
     window.isAddonFullscreen = false; //сразу тут пишу, тк. связано с верхнем летом
     window.toggleAddonFullscreen = function() {
@@ -1603,7 +1740,7 @@
 
             // Собираем итоговое красивое название: Иконка + обычный номер + текст задачи
 
-            const htmlSummary = `<span style="font-weight: 500; color: #475569; margin-right: 4px;">${trackerSvg} ${taskId}</span> ${subjectTopic}`;
+            const htmlSummary = `<span style="font-weight: 400; color: #475569; margin-right: 4px;">${trackerSvg} ${taskId}</span> ${subjectTopic}`;
 
             // =========================================================================
 
