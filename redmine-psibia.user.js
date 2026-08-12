@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.9
+// @version      1.3.10
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
-// @changelog    - Расширено количество иконок для трекеров задач, которые отображаются в подзадачах и связанных задачах\n- Толщина шрифта номера задачи в связанных задачах изменилась с 500 до 400
+// @changelog    - Изменена иконка избранного на красный флажок (ранее была желтая звезда)\n- Функциональность добавления в избранное и удаление из избранного продублирована в модальное окно задачи на панели задач\n- В контекстное меню, открывающемся при помощи нажатия ПКМ по карточки задачи продублирована функциональность открытия задачи в новой вкладке\n- Изменен порядок и группировка элементов в контекстном меню, открывающемся при помощи нажатия ПКМ по карточки задачи
 // @grant        none
 // ==/UserScript==
 
@@ -638,7 +638,7 @@
         });
     }
 
-    // отрисовка звездочек на карточках
+    // отрисовка флажков на карточках
     function initFavoriteStars() {
         const FAV_KEY = 'addon_favorite_tasks';
         const getFavs = () => JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
@@ -662,8 +662,10 @@
                     if (!starEl) {
                         starEl = document.createElement('div');
                         starEl.className = 'addon-fav-star-container';
-                        starEl.style.cssText = 'display: flex; align-items: center; color: #f59e0b; cursor: pointer; padding: 2px;';
-                        starEl.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
+                        // Цвет закладки #ef4444
+                        starEl.style.cssText = 'display: flex; align-items: center; color: #ef4444; cursor: pointer; padding: 2px;';
+                        // Новая иконка (сплошная заливка)
+                        starEl.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
 
                         topRightContainer.appendChild(starEl);
                     }
@@ -676,7 +678,6 @@
         renderStars();
         return renderStars;
     }
-
 
 
 
@@ -712,8 +713,9 @@
             opacity: '0', transition: 'opacity 0.2s ease'
         });
 
-        const createBtn = (svg, title, onClick) => {
+        const createBtn = (svg, title, onClick, id = null) => {
             const btn = document.createElement('div');
+            if (id) btn.id = id;
             btn.innerHTML = svg;
             btn.title = title;
             Object.assign(btn.style, {
@@ -730,22 +732,61 @@
 
                 if (iframe) {
                     try {
-                        //пытаемся забрать АКТУАЛЬНЫЙ адрес, на котором сейчас находится айфрейм
-                        // Это сработает только если находимся в редмайне, на внешние ссылки у айфрейма не будет доступа! По большому счету эта фича позволяет копировать страницу на которой мы находимся, а не только карточку задачи которая изначально была открыта в окне
                         currentUrl = iframe.contentWindow.location.href;
                     } catch (err) {
-                        //сработает защита CORS, если вы перешли на внешний сайт (не pr.isands.ru)
-                        //в этом случае достать новую ссылку технически невозможно, пишем алерт в консольку
                         console.warn('CORS: Невозможно получить внешнюю ссылку. Используем исходную.');
                         currentUrl = iframe.src;
                     }
                 }
 
-                //передаем фактический URL в кнопку (копирование, новая вкладка или рефреш), орпять же только для редмайна
                 onClick(currentUrl, btn);
             };
             return btn;
         };
+
+        // --- КНОПКА ИЗБРАННОГО В IFRAME ---
+        buttonContainer.appendChild(createBtn(
+            '', // SVG установится динамически
+            'Добавить в избранное',
+            (url, btn) => {
+                if (!activeIssueId) return;
+
+                const FAV_KEY = 'addon_favorite_tasks';
+                let favs = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+                const isFav = favs.some(f => f.id === activeIssueId);
+
+                const projectSpan = document.querySelector('.current-project');
+                const projectName = projectSpan ? projectSpan.textContent.trim() : 'Глобальный';
+
+                let assignee = 'Не назначен';
+                let title = 'Без названия';
+                let taskUrl = window.location.origin + '/issues/' + activeIssueId;
+
+                if (activeSourceElement) {
+                    assignee = activeSourceElement.querySelector('.rdb-property-assignee')?.textContent.trim() || assignee;
+                    title = activeSourceElement.querySelector('.rdb-property-subject')?.textContent.trim() || activeSourceElement.querySelector('.c-card-desc')?.textContent.trim() || title;
+                }
+
+                if (!isFav) {
+                    favs.push({ id: activeIssueId, project: projectName, assignee: assignee, title: title, url: taskUrl, timestamp: new Date().getTime() });
+                } else {
+                    favs = favs.filter(f => f.id !== activeIssueId);
+                }
+
+                localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+                if (typeof updateStars === 'function') updateStars();
+
+                const nowFav = !isFav;
+                btn.title = nowFav ? 'Убрать из избранного' : 'Добавить в избранное';
+
+                // Рендер правильного состояния закладки
+                btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${nowFav ? '#ef4444' : 'none'}" stroke="${nowFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+
+                btn.style.transform = 'scale(1.2)';
+                setTimeout(() => btn.style.transform = 'scale(1)', 150);
+            },
+            'addon-modal-fav-btn'
+        ));
 
         buttonContainer.appendChild(createBtn(
             `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
@@ -772,15 +813,12 @@
             (url) => {
                 const iframe = modal.querySelector('iframe');
                 if (iframe && url) {
-                    //возвращаем лоадер, чтобы было понятно, что идет процесс обновления страницы
                     if (!modal.querySelector('.addon-loader')) {
                         const loader = document.createElement('div');
                         loader.className = 'addon-loader';
                         modal.appendChild(loader);
                     }
-                    //скрываем все в айфрейме, пока он грузится, иначе нагружаем ЦП из-за скейлинга и анимашка тормозит
                     iframe.style.opacity = '0';
-                    //перезагрукза (присвоение src заново вызовет iframe.onload, который уберет лоадер и покажет айфрейм)
                     iframe.src = url;
                 }
             }
@@ -797,15 +835,17 @@
         document.body.appendChild(modal);
 
         overlay.addEventListener('click', () => {
-            if (!isModalLocked) closeModal(); // Закрываем только если НЕ заблокировано (защита от мисклика при создании новой таски, выше писал об этом в начале файла)
+            if (!isModalLocked) closeModal();
         });
 
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                if (!isModalLocked) closeModal(); // то же самое про блокировку айфрейма только на кнопку на клаве уыс
+                if (!isModalLocked) closeModal();
             }
         });
     }
+
+
 
     //это рудимент, т.к. я убрал скролл, но выпиливать не стал, вдруг кому понадобится. Чтобы вернуть скролл на доске нужно залезть в расширение стилус и там закомментить строку "scrollbar-width: none;" для #wrapper
     //надо еще дописать свойство border-right здесь для открывшегося контента в айфрейм и задать ширину == scrollbar-width иначе все будет люто флексить при открытии айфрейма
@@ -950,6 +990,23 @@
         const matchId = url ? url.match(/\/issues\/(\d+)/) : null;
         activeIssueId = matchId ? matchId[1] : null;
 
+        // --- ДИНАМИЧЕСКОЕ ОБНОВЛЕНИЕ ЗАКЛАДКИ ПРИ ОТКРЫТИИ ОКНА ---
+        const favBtn = buttonContainer.querySelector('#addon-modal-fav-btn');
+        if (favBtn) {
+            if (activeIssueId) {
+                const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
+                const isFav = favs.some(f => f.id === activeIssueId);
+                favBtn.title = isFav ? 'Убрать из избранного' : 'Добавить в избранное';
+                // Вставляем новую иконку закладки
+                favBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="${isFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+                favBtn.style.display = 'flex';
+            } else {
+                // Прячем кнопку для форм (например, "Создать задачу")
+                favBtn.style.display = 'none';
+            }
+        }
+        // --------------------------------------------------------
+
         document.body.style.overflow = 'hidden';
 
         //показываем оверлей и модалку
@@ -957,7 +1014,6 @@
         setTimeout(() => overlay.style.opacity = '1', 0);
         modal.style.display = 'block';
         buttonContainer.style.opacity = '0';
-
 
         // Анимация
         if (sourceEl) {
@@ -971,14 +1027,14 @@
             void modal.offsetWidth;
             modal.style.transition = 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease';
         } else {
-            //позиционирование для создания задачи, чтобы айфрейм не тикал с экрана
+            //позиционирование для создания задачи
             const h = window.innerHeight * 0.93;
             const t = window.innerHeight - h;
             const w = PREVIEW_WIDTH;
             const l = (window.innerWidth - w) / 2;
 
             modal.style.transition = 'opacity 0.3s ease';
-            modal.style.transform = ''; //убираем transform, он мешает позиционке
+            modal.style.transform = '';
             modal.style.top = t + 'px';
             modal.style.left = l + 'px';
             modal.style.width = w + 'px';
@@ -1030,7 +1086,7 @@
                                 div#content { margin-right: 0px; }
                                 #content { border: none !important; box-shadow: none !important; width: auto !important; }
                                 div#content > div.contextual, .controller-timelog div#content .contextual, .controller-time_entry_reports div#content .contextual {
-                                    margin-top: 0 !important; margin-right: 190px !important;
+                                    margin-top: 0 !important; margin-right: 230px !important;
                                 }
                                 .contextual a.icon { background-image: none !important; padding: 5px 10px !important; display: inline-block !important; }
                                 .contextual a.icon::before { display: none !important; }
@@ -1074,7 +1130,7 @@
                                 display: 'inline-flex',
                                 flexDirection: 'column',
                                 alignItems: 'flex-start',
-                                fontSize: '16px', // уменьшаем основной шрифт с 24px до 16px
+                                fontSize: '16px',
                             });
 
                             //название проекта ПЕРЕД оригинальным текстом H2
@@ -1106,7 +1162,7 @@
                                 titleSpan.style.fontWeight = 'bold';
                                 titleSpan.innerHTML = (isCurrentlyHidden ? '► ' : '▼ ') + originalText;
 
-                                //иконка естеренки
+                                //иконка шестеренки
                                 const cogSpan = doc.createElement('span');
                                 cogSpan.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
                                 cogSpan.style.cursor = 'pointer';
@@ -1203,6 +1259,9 @@
             }, 150);
         });
     }
+
+
+
 
     function closeModal() {
         isModalLocked = false;
@@ -3530,15 +3589,12 @@ function openFiltersModal() {
 
 
     // =================================================================================
-    // КОНТЕКСТНОЕ МЕНЮ ПКМ, ТУТ РАЗНЕС ПО ФУНКЦИЯМ ЧТОБЫ МОЖНО БЫЛО МАСШТАБИТЬ В БУДУЩЕМ
+    // КОНТЕКСТНОЕ МЕНЮ ПКМ
     // =================================================================================
     function initContextMenu(updateStarsCallback) {
         const FAV_KEY = 'addon_favorite_tasks';
         const getFavs = () => JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
         const setFavs = (favs) => localStorage.setItem(FAV_KEY, JSON.stringify(favs));
-
-
-
 
         function openGitIssue(project, ctx) {
             let baseUrl = project.url.trim();
@@ -3574,7 +3630,6 @@ function openFiltersModal() {
 
                 modal = document.createElement('div');
                 modal.id = 'addon-git-issue-modal';
-                //тут переработать логику, чтобы открывалось на 80% по высоте и растягивалось как в адекватных системах
                 modal.style.cssText = `
                     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.95);
                     background: #fff; width: 400px; max-height: 80vh; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.3);
@@ -3585,7 +3640,6 @@ function openFiltersModal() {
 
                 overlay.addEventListener('click', closeModal);
             }
-
 
             function closeModal() {
                 overlay.style.opacity = '0';
@@ -3658,8 +3712,6 @@ function openFiltersModal() {
             }, 10);
         }
 
-
-
         const projectSpan = document.querySelector('.current-project');
         const projectName = projectSpan ? projectSpan.textContent.trim() : 'Глобальный';
 
@@ -3683,7 +3735,7 @@ function openFiltersModal() {
         board.setAttribute('data-context-init', 'true');
 
         // ==========================================
-        // vjlekb lkz vty.
+        // Модули меню
         // ==========================================
 
         const createMenuItem = (iconSvg, text, color, onClick) => {
@@ -3714,24 +3766,7 @@ function openFiltersModal() {
             return div;
         };
 
-        // рудимент для создания ветки в гит, отказался от этого фукнционала, вырезать очень осторожно
-        const makeFeatureName = (taskId, text) => {
-            const cyrillic = {
-                'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh',
-                'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
-                'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts',
-                'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'
-            };
-
-            const transliterated = text.toLowerCase().split('').map(char => cyrillic[char] || char).join('');
-
-            //удаляем символы кроме буков и дефисов
-            const cleanText = transliterated.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-
-            return `${taskId}-${cleanText}`;
-        };
-
-        //трудозатраты
+        // трудозатраты
         const moduleLogTime = (ctx) => {
             const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`;
 
@@ -3746,7 +3781,7 @@ function openFiltersModal() {
             });
         };
 
-        //приортиет
+        // приоритет
         const modulePriorities = (ctx) => {
             const links = Array.from(ctx.card.querySelectorAll('.rdb-issue-menu-progress a'));
             if (links.length === 0) return null;
@@ -3754,7 +3789,6 @@ function openFiltersModal() {
             const fragment = document.createDocumentFragment();
             fragment.appendChild(createSectionHeader('Изменить приоритет'));
 
-            // Строим меню строго по порядку из PRIORITIES_CONFIG
             PRIORITIES_CONFIG.forEach(item => {
                 const link = links.find(l => l.closest('li').classList.contains(item.id));
                 if (link) {
@@ -3769,17 +3803,17 @@ function openFiltersModal() {
             return fragment;
         };
 
-
-        //избранное
+        // избранное
         const moduleFavorite = (ctx) => {
             let favs = getFavs();
             const isFav = favs.some(f => f.id === ctx.taskId);
 
-            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="${isFav ? 'none' : '#f59e0b'}" stroke="${isFav ? '#dc2626' : '#f59e0b'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                ${isFav ? '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>' : '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>'}
+            const iconColor = isFav ? '#ef4444' : 'currentColor';
+            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                ${isFav ? '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>' : '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>'}
             </svg>`;
 
-            return createMenuItem(icon, isFav ? 'Убрать из избранного' : 'Добавить в избранное', isFav ? '#dc2626' : '#334155', () => {
+            return createMenuItem(icon, isFav ? 'Убрать из избранного' : 'Добавить в избранное', isFav ? '#ef4444' : '#334155', () => {
                 favs = getFavs();
                 const existingIndex = favs.findIndex(f => f.id === ctx.taskId);
                 if (existingIndex === -1) {
@@ -3793,8 +3827,7 @@ function openFiltersModal() {
             });
         };
 
-
-        //ишью в гите
+        // ишью в гите
         const moduleCreateGitIssue = (ctx) => {
             const projectSpan = document.querySelector('.current-project');
             const projName = projectSpan ? projectSpan.textContent.trim().replace(/[^a-zA-Zа-яА-Я0-9]/g, '_') : 'global';
@@ -3808,29 +3841,23 @@ function openFiltersModal() {
                 if (projects.length === 0) {
                     showGitIssueModal('empty', ctx);
                 } else if (projects.length === 1) {
-                    openGitIssue(projects[0], ctx); //ВАЖНО!11!!!!!!: передаем projects[0], а не projects[0].url
+                    openGitIssue(projects[0], ctx);
                 } else {
                     showGitIssueModal('select', ctx, projects);
                 }
             });
         };
 
-        //имя фичи //временно вырезал функциональность!
-        /*const moduleCopyFeatureName = (ctx) => {
-            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`;
-            return createMenuItem(icon, 'Имя ветки (на латинице)', '#334155', (itemNode) => {
-                const branchName = makeFeatureName(ctx.taskId, ctx.title);
-                navigator.clipboard.writeText(branchName).then(() => {
-                    const span = itemNode.querySelector('span');
-                    span.textContent = 'Скопировано!';
-                    itemNode.style.color = '#16a34a';
-                    itemNode.querySelector('svg').setAttribute('stroke', '#16a34a');
-                    setTimeout(() => contextMenu.style.display = 'none', 500);
-                });
+        // открыть в новой вкладке
+        const moduleOpenInNewTab = (ctx) => {
+            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+            return createMenuItem(icon, 'В новой вкладке', '#334155', () => {
+                window.open(ctx.taskUrl, '_blank');
+                contextMenu.style.display = 'none';
             });
-        }; */
+        };
 
-        //копировать ссылку
+        // копировать ссылку
         const moduleCopyLink = (ctx) => {
             const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
             return createMenuItem(icon, 'Копировать ссылку', '#334155', (itemNode) => {
@@ -3843,8 +3870,6 @@ function openFiltersModal() {
                 });
             });
         };
-
-
 
         // ==========================================
         // СБОРКА
@@ -3870,26 +3895,30 @@ function openFiltersModal() {
 
             contextMenu.innerHTML = '';
 
+            // 1. Избранное
             contextMenu.appendChild(moduleFavorite(ctx));
             contextMenu.appendChild(createDivider());
 
+            // 2. В новой вкладке и Скопировать ссылку
+            contextMenu.appendChild(moduleOpenInNewTab(ctx));
+            contextMenu.appendChild(moduleCopyLink(ctx));
+            contextMenu.appendChild(createDivider());
+
+            // 3. Приоритеты
             const priorityNode = modulePriorities(ctx);
             if (priorityNode) {
                 contextMenu.appendChild(priorityNode);
                 contextMenu.appendChild(createDivider());
             }
 
+            // 4. Создать issue
+            contextMenu.appendChild(moduleCreateGitIssue(ctx));
+
+            // 5. Добавить трудозатраты
             const logTimeNode = moduleLogTime(ctx);
             if (logTimeNode) {
                 contextMenu.appendChild(logTimeNode);
-                contextMenu.appendChild(createDivider());
             }
-
-            contextMenu.appendChild(moduleCreateGitIssue(ctx));
-
-            //никогда не расскоменчивать, протестить если все ок, то удалить эту строку ниже
-            // contextMenu.appendChild(moduleCopyFeatureName(ctx));
-            contextMenu.appendChild(moduleCopyLink(ctx));
 
             let x = e.clientX;
             let y = e.clientY;
