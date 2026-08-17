@@ -1,12 +1,12 @@
 /* ==UserStyle==
 @name           Redmine Theme from psibia
 @namespace      github.com/psibia
-@version        1.0.1
+@version        1.0.2
 @description    Улучшенный дизайн доски задач Redmine
 @author         psibia.p
 @updateURL      https://raw.githubusercontent.com/psibia/redmine_plugin/main/redmine-psibia.user.css
 ==/UserStyle== */
-@-moz-document regexp("https://pr\\.isands\\.ru/.*taskboard.*") {
+@-moz-document regexp("https://(pr|pm)\\.isands\\.ru/.*taskboard.*") {
     
     
     
