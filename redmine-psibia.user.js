@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.11
+// @version      1.3.12
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
 // @match        https://pm.isands.ru/*
-// @changelog    - Добавлена поддеркжа работы плагина для pm.isands.ru (ранее плагин работал только для pr.isands.ru)
+// @changelog    - Добавлены новые кнопки действий над задачей при открытии ее в модальном окне, изменена композиция\n- Добавлен предпросмотр комментариев при наведении на ссылку\n- Добавлена кнопка создания ссылки на цитату комментария при выделении текста\n<br><br><img src="https://pr.isands.ru/attachments/download/185576/ezgif-3f374a87751c7416.gif" style="max-width: 100%; border-radius: 6px; border: 1px solid #cbd5e1; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
 // @grant        none
 // ==/UserScript==
 
@@ -14,7 +14,7 @@
     'use strict';
 
     // =================================================================================
-    // ЧАСТЬ 1: UI, МОДАЛЬНОЕ ОКНО И ЛОГИКА
+    // ЧАСТЬ 1: UI, МОДАЛЬНОЕ ОКНО И ЛОГИКА 
     // =================================================================================
 
     const deadlineRegex = /(Deadline:|до)\s*(\d{2})\.(\d{2})\.(\d{4})/i; // регулярка для поиска дедлайна или срока завершения в карточках на доске, надо протестить, но вроде формат всегда такой
@@ -684,7 +684,7 @@
 
 
 
-    function initUI() {
+   function initUI() {
         if (document.getElementById('addon-overlay')) return;
 
         overlay = document.createElement('div');
@@ -728,28 +728,60 @@
 
             btn.onclick = (e) => {
                 e.stopPropagation();
-                const iframe = modal.querySelector('iframe');
-                let currentUrl = null;
-
-                if (iframe) {
-                    try {
-                        currentUrl = iframe.contentWindow.location.href;
-                    } catch (err) {
-                        console.warn('CORS: Невозможно получить внешнюю ссылку. Используем исходную.');
-                        currentUrl = iframe.src;
-                    }
-                }
-
-                onClick(currentUrl, btn);
+                onClick(e, btn);
             };
             return btn;
         };
 
-        // --- КНОПКА ИЗБРАННОГО В IFRAME ---
+        // 1. КНОПКА "ДЕЙСТВИЯ" (ТРОЕТОЧИЕ)
+        const moreMenuContainer = document.createElement('div');
+        moreMenuContainer.style.position = 'relative';
+
+        const moreBtn = createBtn(
+            `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>`,
+            'Действия',
+            () => {
+                const dd = document.getElementById('addon-modal-dropdown');
+                dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+            },
+            'addon-modal-more-btn'
+        );
+        moreBtn.style.display = 'none';
+
+        const dropdown = document.createElement('div');
+        dropdown.id = 'addon-modal-dropdown';
+        dropdown.style.cssText = `
+            position: absolute; top: 100%; right: 0; margin-top: 8px;
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15); padding: 6px 0; min-width: 220px;
+            z-index: 10005; display: none; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+        `;
+
+        moreMenuContainer.appendChild(moreBtn);
+        moreMenuContainer.appendChild(dropdown);
+        buttonContainer.appendChild(moreMenuContainer);
+
+        document.addEventListener('click', (e) => {
+            if (!moreMenuContainer.contains(e.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+
+        // 2. КНОПКА "РЕДАКТИРОВАТЬ" (КАРАНДАШИК)
+        const editBtn = createBtn(
+            `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`,
+            'Редактировать',
+            () => {},
+            'addon-modal-edit-btn'
+        );
+        editBtn.style.display = 'none';
+        buttonContainer.appendChild(editBtn);
+
+        // 3. КНОПКА "ИЗБРАННОЕ"
         buttonContainer.appendChild(createBtn(
-            '', // SVG установится динамически
+            '',
             'Добавить в избранное',
-            (url, btn) => {
+            (e, btn) => {
                 if (!activeIssueId) return;
 
                 const FAV_KEY = 'addon_favorite_tasks';
@@ -780,7 +812,6 @@
                 const nowFav = !isFav;
                 btn.title = nowFav ? 'Убрать из избранного' : 'Добавить в избранное';
 
-                // Рендер правильного состояния закладки
                 btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${nowFav ? '#ef4444' : 'none'}" stroke="${nowFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
 
                 btn.style.transform = 'scale(1.2)';
@@ -789,42 +820,36 @@
             'addon-modal-fav-btn'
         ));
 
+        // 4. КНОПКА "КОПИРОВАТЬ ССЫЛКУ" (ВЫНЕСЕНА СЮДА)
         buttonContainer.appendChild(createBtn(
             `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
             'Копировать ссылку',
-            (url, btn) => {
+            (e, btn) => {
+                const iframe = modal.querySelector('iframe');
+                let url = '';
+                if (iframe) {
+                    try { url = iframe.contentWindow.location.href; }
+                    catch (err) { url = iframe.src; }
+                }
                 if (url) {
                     navigator.clipboard.writeText(url);
+                    // Анимация успешного копирования
                     const originalBg = btn.style.backgroundColor;
-                    btn.style.backgroundColor = '#86efac';
-                    setTimeout(() => btn.style.backgroundColor = originalBg, 300);
+                    const originalColor = btn.style.color;
+                    btn.style.backgroundColor = '#dcfce7';
+                    btn.style.color = '#16a34a';
+                    btn.style.transform = 'scale(1.1)';
+                    setTimeout(() => {
+                        btn.style.backgroundColor = originalBg;
+                        btn.style.color = originalColor;
+                        btn.style.transform = 'scale(1)';
+                    }, 300);
                 }
-            }
+            },
+            'addon-modal-copylink-btn'
         ));
 
-        buttonContainer.appendChild(createBtn(
-            `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`,
-            'Открыть в новой вкладке',
-            (url) => { if (url) window.open(url, '_blank'); }
-        ));
-
-        buttonContainer.appendChild(createBtn(
-            `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`,
-            'Обновить страницу',
-            (url) => {
-                const iframe = modal.querySelector('iframe');
-                if (iframe && url) {
-                    if (!modal.querySelector('.addon-loader')) {
-                        const loader = document.createElement('div');
-                        loader.className = 'addon-loader';
-                        modal.appendChild(loader);
-                    }
-                    iframe.style.opacity = '0';
-                    iframe.src = url;
-                }
-            }
-        ));
-
+        // 5. КНОПКА "ЗАКРЫТЬ"
         buttonContainer.appendChild(createBtn(
             `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
             'Закрыть (Esc)',
@@ -845,6 +870,7 @@
             }
         });
     }
+
 
 
 
@@ -971,52 +997,61 @@
         redesignCards();
     }
 
-    // метод для открытия айфрейма с конкретной таской
-    function openModal(url, sourceEl = null, locked = false) {
-        initUI(); //гарантируем, что UI инициализирован
-        isModalLocked = locked; //сохраняем состояние блокировки айфрейма
 
-        // очищаем старые состояния
+
+
+   // метод для открытия айфрейма с конкретной таской
+    function openModal(url, sourceEl = null, locked = false) {
+        initUI();
+        isModalLocked = locked;
+
         if (pulseTimer) clearTimeout(pulseTimer);
         if (cleanupTimer) clearTimeout(cleanupTimer);
         document.querySelectorAll('.rdb-highlight-pulse').forEach(el => el.classList.remove('rdb-highlight-pulse'));
 
-        // очистка и подготовка модалки
+        // Сбрасываем видимость кнопок перед новой загрузкой
+        const editBtn = buttonContainer.querySelector('#addon-modal-edit-btn');
+        const moreBtn = buttonContainer.querySelector('#addon-modal-more-btn');
+        const copyLinkBtn = buttonContainer.querySelector('#addon-modal-copylink-btn');
+        const dropdown = buttonContainer.querySelector('#addon-modal-dropdown');
+        if (editBtn) editBtn.style.display = 'none';
+        if (moreBtn) moreBtn.style.display = 'none';
+        if (dropdown) dropdown.innerHTML = '';
+
         modal.innerHTML = '';
         modal.appendChild(buttonContainer);
 
         activeSourceElement = sourceEl;
 
-        //достаем ID задачи из URL
         const matchId = url ? url.match(/\/issues\/(\d+)/) : null;
-        activeIssueId = matchId ? matchId[1] : null;
+        activeIssueId = matchId && !url.includes('/new') ? matchId[1] : null;
 
-        // --- ДИНАМИЧЕСКОЕ ОБНОВЛЕНИЕ ЗАКЛАДКИ ПРИ ОТКРЫТИИ ОКНА ---
+        // Обновляем состояние кнопки Избранного
         const favBtn = buttonContainer.querySelector('#addon-modal-fav-btn');
         if (favBtn) {
             if (activeIssueId) {
                 const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
                 const isFav = favs.some(f => f.id === activeIssueId);
                 favBtn.title = isFav ? 'Убрать из избранного' : 'Добавить в избранное';
-                // Вставляем новую иконку закладки
                 favBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="${isFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
                 favBtn.style.display = 'flex';
             } else {
-                // Прячем кнопку для форм (например, "Создать задачу")
                 favBtn.style.display = 'none';
             }
         }
-        // --------------------------------------------------------
+
+        // Обновляем видимость новой кнопки "Копировать ссылку"
+        if (copyLinkBtn) {
+            copyLinkBtn.style.display = activeIssueId ? 'flex' : 'none';
+        }
 
         document.body.style.overflow = 'hidden';
 
-        //показываем оверлей и модалку
         overlay.style.display = 'block';
         setTimeout(() => overlay.style.opacity = '1', 0);
         modal.style.display = 'block';
         buttonContainer.style.opacity = '0';
 
-        // Анимация
         if (sourceEl) {
             const rect = sourceEl.getBoundingClientRect();
             modal.style.transition = 'none';
@@ -1028,12 +1063,10 @@
             void modal.offsetWidth;
             modal.style.transition = 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease';
         } else {
-            //позиционирование для создания задачи
             const h = window.innerHeight * 0.93;
             const t = window.innerHeight - h;
             const w = PREVIEW_WIDTH;
             const l = (window.innerWidth - w) / 2;
-
             modal.style.transition = 'opacity 0.3s ease';
             modal.style.transform = '';
             modal.style.top = t + 'px';
@@ -1067,7 +1100,6 @@
                 const iframe = document.createElement('iframe');
                 iframe.style.cssText = "width:100%; height:100%; border:none; opacity: 0; transition: opacity 0.3s ease;";
 
-                //тут мы инжектируем стили внутрь айфрейма
                 const injectStyles = () => {
                     try {
                         const doc = iframe.contentDocument || iframe.contentWindow.document;
@@ -1075,7 +1107,6 @@
                         if (!doc.getElementById('clean-view-css')) {
                             const style = doc.createElement('style');
                             style.id = 'clean-view-css';
-                            //скрываем лишнее внутри iframe
                              style.textContent = `
                                 html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
                                 html, body { -ms-overflow-style: none; scrollbar-width: none; background: #ffffff !important; }
@@ -1087,12 +1118,7 @@
                                 div#content { margin-right: 0px; }
                                 #content { border: none !important; box-shadow: none !important; width: auto !important; }
                                 div#content > div.contextual, .controller-timelog div#content .contextual, .controller-time_entry_reports div#content .contextual {
-                                    margin-top: 0 !important; margin-right: 230px !important;
-                                }
-                                .contextual a.icon { background-image: none !important; padding: 5px 10px !important; display: inline-block !important; }
-                                .contextual a.icon::before { display: none !important; }
-                                .contextual a.icon, .contextual .drdn-trigger {
-                                    border: 1px solid #d1d5db; background-color: #f3f4f6; border-radius: 4px; color: #374151 !important; text-decoration: none !important; font-size: 12px; margin-left: 5px;
+                                    display: none !important;
                                 }
                             `;
                             doc.head.appendChild(style);
@@ -1106,151 +1132,279 @@
                     clearInterval(interval);
                     injectStyles();
 
-                    //добавляем название проекта в заголовок к задаче
                     try {
                         const doc = iframe.contentDocument || iframe.contentWindow.document;
+
+                        let currentIframeUrl = '';
+                        try { currentIframeUrl = iframe.contentWindow.location.href; } catch(err) { currentIframeUrl = iframe.src; }
+
+                        const actualMatchId = currentIframeUrl.match(/\/issues\/(\d+)/);
+                        if (actualMatchId && !currentIframeUrl.includes('/new')) {
+                            activeIssueId = actualMatchId[1];
+                        } else {
+                            activeIssueId = null;
+                        }
+
+                        if (favBtn) {
+                            if (activeIssueId) {
+                                const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
+                                const isFav = favs.some(f => f.id === activeIssueId);
+                                favBtn.title = isFav ? 'Убрать из избранного' : 'Добавить в избранное';
+                                favBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="${isFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+                                favBtn.style.display = 'flex';
+                            } else {
+                                favBtn.style.display = 'none';
+                            }
+                        }
+
+                        if (copyLinkBtn) {
+                            copyLinkBtn.style.display = activeIssueId ? 'flex' : 'none';
+                        }
+
+                        doc.addEventListener('click', () => {
+                            if (dropdown) dropdown.style.display = 'none';
+                        });
+
+                        const firstContextual = doc.querySelector('#content > .contextual');
+                        const contextualLinks = firstContextual ? firstContextual.querySelectorAll('a') : [];
+
+                        let editLink = null;
+                        contextualLinks.forEach(l => {
+                            if (l.classList.contains('icon-edit')) editLink = l;
+                        });
+
+                        if (editBtn) {
+                            if (editLink && activeIssueId) {
+                                editBtn.style.display = 'flex';
+                                editBtn.onclick = (e) => { e.stopPropagation(); editLink.click(); };
+                            } else {
+                                editBtn.style.display = 'none';
+                            }
+                        }
+
+                        if (moreBtn) {
+                            moreBtn.style.display = 'flex';
+
+                            moreBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                if (dropdown.style.display === 'block') {
+                                    dropdown.style.display = 'none';
+                                    return;
+                                }
+
+                                dropdown.innerHTML = '';
+
+                                const createDdItem = (icon, text, color, onClick) => {
+                                    const item = document.createElement('div');
+                                    item.style.cssText = `padding: 8px 16px; cursor: pointer; display: flex; align-items: center; gap: 8px; color: ${color}; transition: background 0.2s;`;
+                                    item.innerHTML = `${icon} <span style="pointer-events:none;">${text}</span>`;
+                                    item.onmouseenter = () => item.style.backgroundColor = '#f1f5f9';
+                                    item.onmouseleave = () => item.style.backgroundColor = 'transparent';
+                                    item.onclick = (ev) => { ev.stopPropagation(); dropdown.style.display = 'none'; onClick(); };
+                                    return item;
+                                };
+
+                                const createDivider = () => {
+                                    const div = document.createElement('div');
+                                    div.style.cssText = 'height: 1px; background: #e2e8f0; margin: 4px 0;';
+                                    return div;
+                                };
+
+                                const getIframeUrl = () => {
+                                    try { return iframe.contentWindow.location.href; }
+                                    catch (err) { return iframe.src; }
+                                };
+
+                                const freshContextual = doc.querySelector('#content > .contextual');
+                                const freshLinks = freshContextual ? freshContextual.querySelectorAll('a') : [];
+
+                                const getNative = (cls) => Array.from(freshLinks).find(l => l.className.includes(cls) && !l.classList.contains('icon-copy-link'));
+
+                                const watcherLink = getNative('watcher');
+                                const timeAddLink = getNative('icon-time-add');
+                                const copyTaskLink = getNative('icon-copy');
+                                const delLink = getNative('icon-del');
+
+                                // --- 1 БЛОК: Открыть в новой, Обновить ---
+                                const newTabIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+                                dropdown.appendChild(createDdItem(newTabIcon, 'Открыть в новой вкладке', '#334155', () => window.open(getIframeUrl(), '_blank')));
+
+                                const refreshIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
+                                dropdown.appendChild(createDdItem(refreshIcon, 'Обновить страницу', '#334155', () => {
+                                    if (!modal.querySelector('.addon-loader')) {
+                                        const loader = document.createElement('div');
+                                        loader.className = 'addon-loader';
+                                        modal.appendChild(loader);
+                                    }
+                                    iframe.style.opacity = '0';
+                                    iframe.src = getIframeUrl();
+                                }));
+
+                                dropdown.appendChild(createDivider());
+
+                                // --- 2 БЛОК: Следить / Не следить ---
+                                if (watcherLink) {
+                                    const text = watcherLink.textContent.trim();
+                                    const isWatching = watcherLink.classList.contains('icon-fav');
+                                    const iconColor = isWatching ? '#f59e0b' : 'currentColor';
+                                    const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+                                    dropdown.appendChild(createDdItem(icon, text, '#334155', () => watcherLink.click()));
+
+                                    dropdown.appendChild(createDivider());
+                                }
+
+                                // --- 3 БЛОК (ТОЛЬКО ДЛЯ СОЗДАННОЙ ЗАДАЧИ) ---
+                                if (activeIssueId) {
+                                    const issueIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>`;
+                                    dropdown.appendChild(createDdItem(issueIcon, 'Создать issue', '#334155', () => {
+                                        const projectSpan = document.querySelector('.current-project');
+                                        const projName = projectSpan ? projectSpan.textContent.trim().replace(/[^a-zA-Zа-яА-Я0-9]/g, '_') : 'global';
+                                        const projects = JSON.parse(localStorage.getItem('addon_git_projects_' + projName) || '[]');
+
+                                        let title = 'Без названия';
+                                        if (activeSourceElement) {
+                                            title = activeSourceElement.querySelector('.rdb-property-subject')?.textContent.trim() || activeSourceElement.querySelector('.c-card-desc')?.textContent.trim() || title;
+                                        } else {
+                                            try { title = doc.querySelector('.subject h3')?.textContent.trim() || title; } catch(e){}
+                                        }
+                                        const ctx = { taskId: activeIssueId, title: title };
+
+                                        if (projects.length === 0) {
+                                            if (window.addonShowGitIssueModal) window.addonShowGitIssueModal('empty', ctx);
+                                        } else if (projects.length === 1) {
+                                            if (window.addonOpenGitIssue) window.addonOpenGitIssue(projects[0], ctx);
+                                        } else {
+                                            if (window.addonShowGitIssueModal) window.addonShowGitIssueModal('select', ctx, projects);
+                                        }
+                                    }));
+
+                                    const timeIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`;
+                                    if (timeAddLink) {
+                                        dropdown.appendChild(createDdItem(timeIcon, timeAddLink.textContent.trim(), '#334155', () => timeAddLink.click()));
+                                    } else {
+                                        dropdown.appendChild(createDdItem(timeIcon, 'Добавить трудозатраты', '#334155', () => {
+                                            iframe.src = `${window.location.origin}/issues/${activeIssueId}/time_entries/new`;
+                                        }));
+                                    }
+
+                                    if (copyTaskLink || delLink) {
+                                        dropdown.appendChild(createDivider());
+                                    }
+
+                                    if (copyTaskLink) {
+                                        const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+                                        dropdown.appendChild(createDdItem(icon, 'Копировать задачу', '#334155', () => copyTaskLink.click()));
+                                    }
+
+                                    if (delLink) {
+                                        const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+                                        dropdown.appendChild(createDdItem(icon, 'Удалить задачу', '#ef4444', () => delLink.click()));
+                                    }
+                                }
+
+                                dropdown.style.display = 'block';
+                            };
+                        }
+
+                        // Логика кастомных заголовков и файлов (остается без изменений)
                         const projectSpan = doc.querySelector('.current-project');
                         const h2 = doc.querySelector('div#content > h2.inline-flex') || doc.querySelector('div#content > h2');
 
                         if (projectSpan && h2 && !doc.getElementById('addon-project-badge')) {
                             const projectName = projectSpan.textContent.trim();
-
-                            // создаем надпись с названием проекта
                             const projectLabel = doc.createElement('span');
                             projectLabel.id = 'addon-project-badge';
                             projectLabel.textContent = projectName;
 
-                            Object.assign(projectLabel.style, {
-                                fontSize: '16px',
-                                fontWeight: '600',
-                                color: '#64748b',
-                                lineHeight: '1'
-                            });
-
-                            Object.assign(h2.style, {
-                                display: 'inline-flex',
-                                flexDirection: 'column',
-                                alignItems: 'flex-start',
-                                fontSize: '16px',
-                            });
-
-                            //название проекта ПЕРЕД оригинальным текстом H2
+                            Object.assign(projectLabel.style, { fontSize: '16px', fontWeight: '600', color: '#64748b', lineHeight: '1' });
+                            Object.assign(h2.style, { display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', fontSize: '16px' });
                             h2.insertBefore(projectLabel, h2.firstChild);
 
-                           //сворачиваем блок с файлами
-                        const attachmentsDiv = doc.querySelector('.attachments');
-                        if (attachmentsDiv) {
-                            const filesHeader = attachmentsDiv.previousElementSibling;
-
-                            if (filesHeader && filesHeader.tagName.toLowerCase() === 'p' && filesHeader.textContent.includes('Файлы')) {
-
-                                //читаем настройку (по умолчанию сворачиваем)
-                                let isCollapsedByDefault = localStorage.getItem('addon_files_collapsed_default') !== 'false';
-                                let isCurrentlyHidden = isCollapsedByDefault;
-                                attachmentsDiv.style.display = isCurrentlyHidden ? 'none' : 'block';
-
-                                //перестраиваем заголовок
-                                const originalText = 'Файлы';
-                                filesHeader.style.display = 'inline-flex';
-                                filesHeader.style.alignItems = 'center';
-                                filesHeader.style.gap = '8px';
-                                filesHeader.style.userSelect = 'none';
-                                filesHeader.style.position = 'relative';
-                                filesHeader.innerHTML = '';
-
-                                const titleSpan = doc.createElement('span'); // чтобы можно было кликнуть на текст
-                                titleSpan.style.cursor = 'pointer';
-                                titleSpan.style.fontWeight = 'bold';
-                                titleSpan.innerHTML = (isCurrentlyHidden ? '► ' : '▼ ') + originalText;
-
-                                //иконка шестеренки
-                                const cogSpan = doc.createElement('span');
-                                cogSpan.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
-                                cogSpan.style.cursor = 'pointer';
-                                Object.assign(cogSpan.style, {
-                                    display: 'flex', alignItems: 'center', padding: '0px', borderRadius: '4px'
-                                });
-                                cogSpan.onmouseenter = () => cogSpan.style.backgroundColor = '#f1f5f9';
-                                cogSpan.onmouseleave = () => cogSpan.style.backgroundColor = 'transparent';
-
-                                //модалка с переключателем
-                                const settingsMenu = doc.createElement('div');
-                                Object.assign(settingsMenu.style, {
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: '0',
-                                    marginTop: '6px',
-                                    backgroundColor: '#fff',
-                                    border: '1px solid #e2e8f0',
-                                    borderRadius: '8px',
-                                    boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-                                    padding: '10px 12px',
-                                    minWidth: '220px',
-                                    zIndex: '1000',
-                                    display: 'none',
-                                    fontFamily: "'Inter', sans-serif",
-                                    fontWeight: 'normal',
-                                    cursor: 'default'
-                                });
-
-                                settingsMenu.innerHTML = `
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <span style="font-size: 13px; color: #334155;">Сворачивать по умолчанию</span>
-                                        <label style="position: relative; display: inline-block; width: 32px; height: 18px; margin: 0;">
-                                            <input type="checkbox" id="addon-files-toggle" style="opacity: 0; width: 0; height: 0;" ${isCollapsedByDefault ? 'checked' : ''}>
-                                            <span id="addon-files-slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isCollapsedByDefault ? '#3b82f6' : '#cbd5e1'}; transition: .2s; border-radius: 18px;">
-                                                <span id="addon-files-knob" style="position: absolute; content: ''; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: white; transition: .2s; border-radius: 50%; transform: ${isCollapsedByDefault ? 'translateX(14px)' : 'translateX(0)'};"></span>
-                                            </span>
-                                        </label>
-                                    </div>
-                                `;
-
-                                filesHeader.appendChild(titleSpan);
-                                filesHeader.appendChild(cogSpan);
-                                filesHeader.appendChild(settingsMenu);
-
-                                // логика ручного сворачивания (клик по тексту)
-                                titleSpan.addEventListener('click', () => {
-                                    isCurrentlyHidden = !isCurrentlyHidden;
+                            const attachmentsDiv = doc.querySelector('.attachments');
+                            if (attachmentsDiv) {
+                                const filesHeader = attachmentsDiv.previousElementSibling;
+                                if (filesHeader && filesHeader.tagName.toLowerCase() === 'p' && filesHeader.textContent.includes('Файлы')) {
+                                    let isCollapsedByDefault = localStorage.getItem('addon_files_collapsed_default') !== 'false';
+                                    let isCurrentlyHidden = isCollapsedByDefault;
                                     attachmentsDiv.style.display = isCurrentlyHidden ? 'none' : 'block';
+
+                                    const originalText = 'Файлы';
+                                    filesHeader.style.display = 'inline-flex';
+                                    filesHeader.style.alignItems = 'center';
+                                    filesHeader.style.gap = '8px';
+                                    filesHeader.style.userSelect = 'none';
+                                    filesHeader.style.position = 'relative';
+                                    filesHeader.innerHTML = '';
+
+                                    const titleSpan = doc.createElement('span');
+                                    titleSpan.style.cursor = 'pointer';
+                                    titleSpan.style.fontWeight = 'bold';
                                     titleSpan.innerHTML = (isCurrentlyHidden ? '► ' : '▼ ') + originalText;
-                                });
 
-                                // Логика открытия/закрытия меню (клик по шестеренке)
-                                cogSpan.addEventListener('click', (e) => {
-                                    e.stopPropagation();
-                                    settingsMenu.style.display = settingsMenu.style.display === 'block' ? 'none' : 'block';
-                                });
+                                    const cogSpan = doc.createElement('span');
+                                    cogSpan.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+                                    cogSpan.style.cursor = 'pointer';
+                                    Object.assign(cogSpan.style, { display: 'flex', alignItems: 'center', padding: '0px', borderRadius: '4px' });
+                                    cogSpan.onmouseenter = () => cogSpan.style.backgroundColor = '#f1f5f9';
+                                    cogSpan.onmouseleave = () => cogSpan.style.backgroundColor = 'transparent';
 
-                                //Закрытие меню при клике вне его области (внутри iframe)
-                                doc.addEventListener('click', (e) => {
-                                    if (!filesHeader.contains(e.target)) {
-                                        settingsMenu.style.display = 'none';
-                                    }
-                                });
+                                    const settingsMenu = doc.createElement('div');
+                                    Object.assign(settingsMenu.style, {
+                                        position: 'absolute', top: '100%', left: '0', marginTop: '6px', backgroundColor: '#fff',
+                                        border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                                        padding: '10px 12px', minWidth: '220px', zIndex: '1000', display: 'none',
+                                        fontFamily: "'Inter', sans-serif", fontWeight: 'normal', cursor: 'default'
+                                    });
 
-                                const filesToggle = settingsMenu.querySelector('#addon-files-toggle');
-                                const filesSlider = settingsMenu.querySelector('#addon-files-slider');
-                                const filesKnob = settingsMenu.querySelector('#addon-files-knob');
+                                    settingsMenu.innerHTML = `
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="font-size: 13px; color: #334155;">Сворачивать по умолчанию</span>
+                                            <label style="position: relative; display: inline-block; width: 32px; height: 18px; margin: 0;">
+                                                <input type="checkbox" id="addon-files-toggle" style="opacity: 0; width: 0; height: 0;" ${isCollapsedByDefault ? 'checked' : ''}>
+                                                <span id="addon-files-slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isCollapsedByDefault ? '#3b82f6' : '#cbd5e1'}; transition: .2s; border-radius: 18px;">
+                                                    <span id="addon-files-knob" style="position: absolute; content: ''; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: white; transition: .2s; border-radius: 50%; transform: ${isCollapsedByDefault ? 'translateX(14px)' : 'translateX(0)'};"></span>
+                                                </span>
+                                            </label>
+                                        </div>
+                                    `;
 
-                                filesToggle.addEventListener('change', (e) => {
-                                    const isChecked = e.target.checked;
-                                    localStorage.setItem('addon_files_collapsed_default', isChecked);
+                                    filesHeader.appendChild(titleSpan);
+                                    filesHeader.appendChild(cogSpan);
+                                    filesHeader.appendChild(settingsMenu);
 
-                                    //анимашка
-                                    filesSlider.style.backgroundColor = isChecked ? '#3b82f6' : '#cbd5e1';
-                                    filesKnob.style.transform = isChecked ? 'translateX(14px)' : 'translateX(0)';
-                                });
+                                    titleSpan.addEventListener('click', () => {
+                                        isCurrentlyHidden = !isCurrentlyHidden;
+                                        attachmentsDiv.style.display = isCurrentlyHidden ? 'none' : 'block';
+                                        titleSpan.innerHTML = (isCurrentlyHidden ? '► ' : '▼ ') + originalText;
+                                    });
+
+                                    cogSpan.addEventListener('click', (e) => {
+                                        e.stopPropagation();
+                                        settingsMenu.style.display = settingsMenu.style.display === 'block' ? 'none' : 'block';
+                                    });
+
+                                    doc.addEventListener('click', (e) => {
+                                        if (!filesHeader.contains(e.target)) settingsMenu.style.display = 'none';
+                                    });
+
+                                    const filesToggle = settingsMenu.querySelector('#addon-files-toggle');
+                                    const filesSlider = settingsMenu.querySelector('#addon-files-slider');
+                                    const filesKnob = settingsMenu.querySelector('#addon-files-knob');
+
+                                    filesToggle.addEventListener('change', (e) => {
+                                        const isChecked = e.target.checked;
+                                        localStorage.setItem('addon_files_collapsed_default', isChecked);
+                                        filesSlider.style.backgroundColor = isChecked ? '#3b82f6' : '#cbd5e1';
+                                        filesKnob.style.transform = isChecked ? 'translateX(14px)' : 'translateX(0)';
+                                    });
+                                }
                             }
                         }
-                        }
-                    } catch (e) {
-                    }
+                    } catch (e) {}
 
                     setTimeout(() => {
                         const activeLoader = modal.querySelector('.addon-loader');
                         if (activeLoader) activeLoader.remove();
-
                         iframe.style.opacity = '1';
                     }, 100);
                 };
@@ -1260,6 +1414,9 @@
             }, 150);
         });
     }
+
+
+
 
 
 
@@ -3589,15 +3746,13 @@ function openFiltersModal() {
 
 
 
-    // =================================================================================
-    // КОНТЕКСТНОЕ МЕНЮ ПКМ
-    // =================================================================================
     function initContextMenu(updateStarsCallback) {
         const FAV_KEY = 'addon_favorite_tasks';
         const getFavs = () => JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
         const setFavs = (favs) => localStorage.setItem(FAV_KEY, JSON.stringify(favs));
 
-        function openGitIssue(project, ctx) {
+        // Выносим функции для создания Issue в глобальную область, чтобы их мог дергать Iframe
+        window.addonOpenGitIssue = function(project, ctx) {
             let baseUrl = project.url.trim();
             const prefix = project.prefix ? project.prefix.trim() : '';
 
@@ -3617,9 +3772,9 @@ function openFiltersModal() {
             const desc = encodeURIComponent(ctx.title);
             const finalUrl = `${baseUrl}?issue[title]=${title}&issue[description]=${desc}`;
             window.open(finalUrl, '_blank');
-        }
+        };
 
-        function showGitIssueModal(type, ctx, projects = []) {
+        window.addonShowGitIssueModal = function(type, ctx, projects = []) {
             let overlay = document.getElementById('addon-git-issue-overlay');
             let modal = document.getElementById('addon-git-issue-modal');
 
@@ -3698,7 +3853,7 @@ function openFiltersModal() {
                     item.onmouseleave = () => { item.style.backgroundColor = '#f8fafc'; item.style.borderColor = '#e2e8f0'; };
                     item.onclick = () => {
                         const project = projects[index];
-                        openGitIssue(project, ctx);
+                        window.addonOpenGitIssue(project, ctx);
                         closeModal();
                     };
                 });
@@ -3711,7 +3866,7 @@ function openFiltersModal() {
                 modal.style.opacity = '1';
                 modal.style.transform = 'translate(-50%, -50%) scale(1)';
             }, 10);
-        }
+        };
 
         const projectSpan = document.querySelector('.current-project');
         const projectName = projectSpan ? projectSpan.textContent.trim() : 'Глобальный';
@@ -3767,10 +3922,8 @@ function openFiltersModal() {
             return div;
         };
 
-        // трудозатраты
         const moduleLogTime = (ctx) => {
             const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`;
-
             return createMenuItem(icon, 'Добавить трудозатраты', '#334155', () => {
                 const timeEntryUrl = `${window.location.origin}/issues/${ctx.taskId}/time_entries/new`;
                 contextMenu.style.display = 'none';
@@ -3782,7 +3935,6 @@ function openFiltersModal() {
             });
         };
 
-        // приоритет
         const modulePriorities = (ctx) => {
             const links = Array.from(ctx.card.querySelectorAll('.rdb-issue-menu-progress a'));
             if (links.length === 0) return null;
@@ -3800,17 +3952,15 @@ function openFiltersModal() {
                     }));
                 }
             });
-
             return fragment;
         };
 
-        // избранное
         const moduleFavorite = (ctx) => {
             let favs = getFavs();
             const isFav = favs.some(f => f.id === ctx.taskId);
 
-            const iconColor = isFav ? '#ef4444' : 'currentColor';
-            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            const iconColor = isFav ? '#ef4444' : '#64748b';
+            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 ${isFav ? '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>' : '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>'}
             </svg>`;
 
@@ -3828,7 +3978,6 @@ function openFiltersModal() {
             });
         };
 
-        // ишью в гите
         const moduleCreateGitIssue = (ctx) => {
             const projectSpan = document.querySelector('.current-project');
             const projName = projectSpan ? projectSpan.textContent.trim().replace(/[^a-zA-Zа-яА-Я0-9]/g, '_') : 'global';
@@ -3840,16 +3989,15 @@ function openFiltersModal() {
                 const projects = JSON.parse(localStorage.getItem('addon_git_projects_' + projName) || '[]');
 
                 if (projects.length === 0) {
-                    showGitIssueModal('empty', ctx);
+                    window.addonShowGitIssueModal('empty', ctx);
                 } else if (projects.length === 1) {
-                    openGitIssue(projects[0], ctx);
+                    window.addonOpenGitIssue(projects[0], ctx);
                 } else {
-                    showGitIssueModal('select', ctx, projects);
+                    window.addonShowGitIssueModal('select', ctx, projects);
                 }
             });
         };
 
-        // открыть в новой вкладке
         const moduleOpenInNewTab = (ctx) => {
             const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
             return createMenuItem(icon, 'В новой вкладке', '#334155', () => {
@@ -3858,7 +4006,6 @@ function openFiltersModal() {
             });
         };
 
-        // копировать ссылку
         const moduleCopyLink = (ctx) => {
             const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
             return createMenuItem(icon, 'Копировать ссылку', '#334155', (itemNode) => {
@@ -3933,7 +4080,6 @@ function openFiltersModal() {
             contextMenu.style.top = y + 'px';
         });
     }
-
 
 
 
@@ -5656,11 +5802,441 @@ function openFiltersModal() {
 
 
 
+
+
+
+    // =================================================================================
+    // ПРЕДПРОСМОТР КОММЕНТАРИЕВ ПРИ НАВЕДЕНИИ
+    // =================================================================================
+    function initCommentPreview() {
+        if (window.addonCommentPreviewInitialized) return;
+        window.addonCommentPreviewInitialized = true;
+
+        // Глобальный кэш в памяти браузера
+        const topWin = window.top || window;
+        topWin.addonCommentCache = topWin.addonCommentCache || new Map();
+
+        const popup = document.createElement('div');
+        popup.id = 'addon-comment-preview-popup';
+        // Без transition и opacity, мгновенное появление
+        popup.style.cssText = `
+            position: absolute;
+            z-index: 100000;
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            width: 850px;
+            max-width: 90vw;
+            max-height: 50vh;
+            overflow-y: auto;
+            padding: 20px;
+            display: none;
+        `;
+        document.body.appendChild(popup);
+
+        let activeLink = null;
+        let showTimer = null;
+        let hideTimer = null;
+
+        document.addEventListener('mouseover', (e) => {
+            const a = e.target.closest('a');
+            if (!a) return;
+
+            const href = a.getAttribute('href');
+            if (!href) return;
+
+            const match = href.match(/\/issues\/(\d+)#note-(\d+)(?::~:text=(.*))?/);
+            if (!match) return;
+
+            clearTimeout(hideTimer);
+
+            // Если навели на НОВУЮ ссылку
+            if (activeLink !== a) {
+                activeLink = a;
+                clearTimeout(showTimer);
+
+                // Задержка 150мс
+                showTimer = setTimeout(() => {
+                    showPreview(a, match[1], match[2], match[3]);
+                }, 150);
+            }
+        });
+
+        document.addEventListener('mouseout', (e) => {
+            const a = e.target.closest('a');
+            if (a && activeLink === a) {
+                if (!a.contains(e.relatedTarget)) {
+                    clearTimeout(showTimer);
+                    hideTimer = setTimeout(() => {
+                        popup.style.display = 'none';
+                        activeLink = null;
+                    }, 100);
+                }
+            }
+        });
+
+        popup.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+        popup.addEventListener('mouseleave', () => {
+            hideTimer = setTimeout(() => {
+                popup.style.display = 'none';
+                activeLink = null;
+            }, 100);
+        });
+
+        function positionPopup(targetEl) {
+            popup.style.display = 'block';
+            const rect = targetEl.getBoundingClientRect();
+            const popupHeight = popup.offsetHeight;
+            const popupWidth = popup.offsetWidth;
+
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const spaceAbove = rect.top;
+
+            let topPos;
+            if (spaceBelow < popupHeight + 20 && spaceAbove > spaceBelow) {
+                topPos = rect.top + window.scrollY - popupHeight - 10;
+            } else {
+                topPos = rect.bottom + window.scrollY + 10;
+            }
+
+            let leftPos = rect.left + window.scrollX;
+            if (leftPos + popupWidth > window.innerWidth + window.scrollX) {
+                leftPos = (window.innerWidth + window.scrollX) - popupWidth - 20;
+            }
+
+            popup.style.top = topPos + 'px';
+            popup.style.left = Math.max(10, leftPos) + 'px';
+        }
+
+        async function showPreview(aEl, issueId, noteId, textFragment) {
+            const expectedLink = activeLink;
+
+            popup.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: center; height: 100px; color: #64748b; font-family: 'Inter', sans-serif;">
+                    <div class="addon-loader" style="width:24px; height:24px; border:3px solid #f3f3f3; border-top:3px solid #3b82f6; border-radius:50%; animation:addon-spin 1s linear infinite; margin-right: 10px; position: static; margin-top: 0;"></div>
+                    Загрузка комментария...
+                </div>
+            `;
+
+            positionPopup(aEl);
+
+            let doc;
+            if (topWin.addonCommentCache.has(issueId)) {
+                doc = topWin.addonCommentCache.get(issueId);
+            } else {
+                try {
+                    const res = await fetch('/issues/' + issueId);
+                    if (!res.ok) throw new Error('Ошибка сети');
+                    const html = await res.text();
+                    doc = new DOMParser().parseFromString(html, 'text/html');
+                    topWin.addonCommentCache.set(issueId, doc);
+                } catch (err) {
+                    if (activeLink !== expectedLink) return;
+                    popup.innerHTML = `<div style="color: #ef4444; padding: 20px; font-family: 'Inter', sans-serif;">Ошибка загрузки задачи #${issueId}</div>`;
+                    positionPopup(aEl);
+                    return;
+                }
+            }
+
+            if (activeLink !== expectedLink) return;
+
+            const noteEl = doc.getElementById('note-' + noteId);
+            if (!noteEl) {
+                popup.innerHTML = `<div style="color: #64748b; padding: 20px; font-family: 'Inter', sans-serif;">Комментарий не найден</div>`;
+                positionPopup(aEl);
+                return;
+            }
+
+            const journal = noteEl.closest('.journal');
+            if (!journal) return;
+
+            const clone = journal.cloneNode(true);
+            const contextual = clone.querySelector('.contextual');
+            if (contextual) contextual.remove();
+
+            clone.style.border = 'none';
+            clone.style.margin = '0';
+            clone.style.padding = '0';
+
+            popup.innerHTML = '';
+            popup.appendChild(clone);
+
+            if (textFragment) applyHighlight(clone, textFragment);
+
+            positionPopup(aEl);
+        }
+
+        function applyHighlight(element, fragment) {
+            try {
+                // Разделяем фрагмент до декодирования
+                const directives = fragment.split('&').map(d => d.replace(/^text=/, ''));
+
+                directives.forEach(directive => {
+                    let terms = directive.split(',');
+                    let textStart = '', textEnd = '';
+
+                    // Отсекаем префиксы и суффиксы Chrome
+                    if (terms.length > 0 && terms[0].endsWith('-')) terms.shift();
+                    if (terms.length > 0 && terms[terms.length - 1].startsWith('-')) terms.pop();
+
+                    // Декодируем
+                    if (terms.length > 0) textStart = decodeURIComponent(terms[0]).replace(/\+/g, ' ').trim();
+                    if (terms.length > 1) textEnd = decodeURIComponent(terms[1]).replace(/\+/g, ' ').trim();
+
+                    if (!textStart) return;
+
+                    // Собираем весь текст в одну длинную строку (обходит разрывы тегов)
+                    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+                    let node;
+                    const textItems = [];
+                    let fullText = "";
+
+                    while (node = walker.nextNode()) {
+                        const val = node.nodeValue;
+                        textItems.push({
+                            node: node,
+                            start: fullText.length,
+                            end: fullText.length + val.length,
+                            text: val
+                        });
+                        fullText += val;
+                    }
+
+                    // Умная регулярка, игнорирующая переносы строк и лишние пробелы
+                    const buildFuzzyRegex = (str) => {
+                        return new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'is');
+                    };
+
+                    const startRegex = buildFuzzyRegex(textStart);
+                    const startMatch = startRegex.exec(fullText);
+                    if (!startMatch) return;
+
+                    let highlightStart = startMatch.index;
+                    let highlightEnd = startMatch.index + startMatch[0].length;
+
+                    if (textEnd) {
+                        const endRegex = buildFuzzyRegex(textEnd);
+                        endRegex.lastIndex = highlightStart;
+                        const endMatch = endRegex.exec(fullText);
+                        if (endMatch) {
+                            highlightEnd = endMatch.index + endMatch[0].length;
+                        }
+                    }
+
+                    // Находим и оборачиваем нужные текстовые узлы
+                    const nodesToWrap = [];
+                    for (let i = 0; i < textItems.length; i++) {
+                        const item = textItems[i];
+                        if (item.end > highlightStart && item.start < highlightEnd) {
+                            const overlapStart = Math.max(0, highlightStart - item.start);
+                            const overlapEnd = Math.min(item.text.length, highlightEnd - item.start);
+                            nodesToWrap.push({
+                                node: item.node,
+                                startOffset: overlapStart,
+                                endOffset: overlapEnd
+                            });
+                        }
+                    }
+
+                    // Режем с конца
+                    nodesToWrap.reverse().forEach(wrapInfo => {
+                        let n = wrapInfo.node;
+                        if (wrapInfo.endOffset < n.nodeValue.length) {
+                            n.splitText(wrapInfo.endOffset);
+                        }
+                        if (wrapInfo.startOffset > 0) {
+                            n = n.splitText(wrapInfo.startOffset);
+                        }
+
+                        if (n.nodeValue.trim().length > 0) {
+                            const mark = document.createElement('mark');
+                            mark.style.backgroundColor = '#fef08a';
+                            mark.style.color = '#0f172a';
+                            mark.style.borderRadius = '2px';
+                            // НИКАКИХ box-shadow И padding! Строки не будут накладываться
+                            n.parentNode.insertBefore(mark, n);
+                            mark.appendChild(n);
+                        }
+                    });
+                });
+
+                // БЕЗОПАСНЫЙ СКРОЛЛ
+                setTimeout(() => {
+                    const firstMark = element.querySelector('mark');
+                    const popupEl = document.getElementById('addon-comment-preview-popup');
+                    if (firstMark && popupEl) {
+                        const markRect = firstMark.getBoundingClientRect();
+                        const popupRect = popupEl.getBoundingClientRect();
+
+                        // Скроллим ТОЛЬКО внутренний контейнер iframe-окна
+                        const scrollOffset = (markRect.top - popupRect.top) - (popupRect.height / 2) + (markRect.height / 2);
+                        popupEl.scrollTop += scrollOffset;
+                    }
+                }, 10);
+
+            } catch (e) {
+                console.error("Highlighter error:", e);
+            }
+        }
+    }
+
+
+
+
+    // =================================================================================
+    // ГЕНЕРАТОР ССЫЛОК НА ВЫДЕЛЕННЫЙ ТЕКСТ (ЦИТАТЫ)
+    // =================================================================================
+    function initHighlightCopier() {
+        if (document.getElementById('addon-highlight-copier')) return;
+
+        // Создаем кнопку-попап
+        const popup = document.createElement('div');
+        popup.id = 'addon-highlight-copier';
+        popup.style.cssText = `
+            position: absolute;
+            z-index: 100005;
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            padding: 6px 12px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            color: #334155;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            opacity: 0;
+            pointer-events: none;
+        `;
+
+        const iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>`;
+        const successSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+        popup.innerHTML = `${iconSvg} <span class="addon-hc-text">Ссылка на цитату</span>`;
+        document.body.appendChild(popup);
+
+        let currentSelection = '';
+        let currentNoteId = '';
+
+        // Эффекты при наведении
+        popup.addEventListener('mouseenter', () => {
+            if (popup.style.pointerEvents !== 'none') {
+                popup.style.backgroundColor = '#f1f5f9';
+                popup.style.borderColor = '#94a3b8';
+            }
+        });
+        popup.addEventListener('mouseleave', () => {
+            if (popup.style.pointerEvents !== 'none') {
+                popup.style.backgroundColor = '#fff';
+                popup.style.borderColor = '#cbd5e1';
+            }
+        });
+
+        // Скрываем попап при начале нового выделения (клике)
+        document.addEventListener('mousedown', (e) => {
+            if (!popup.contains(e.target)) {
+                popup.style.opacity = '0';
+                popup.style.pointerEvents = 'none';
+            }
+        });
+
+        // Показываем попап при окончании выделения
+        document.addEventListener('mouseup', (e) => {
+            // Даем браузеру миллисекунду на обновление объекта Selection
+            setTimeout(() => {
+                const selection = window.getSelection();
+                const text = selection.toString().trim();
+
+                if (text.length > 0) {
+                    // Надежный способ найти родителя выделенного текста
+                    const range = selection.getRangeAt(0);
+                    const container = range.commonAncestorContainer;
+                    const element = container.nodeType === 3 ? container.parentElement : container;
+
+                    const noteEl = element.closest('.note');
+
+                    if (noteEl) {
+                        currentSelection = text;
+                        currentNoteId = noteEl.id; // Например, "note-12"
+
+                        if (currentNoteId) {
+                            // Сбрасываем внешний вид кнопки
+                            popup.style.backgroundColor = '#fff';
+                            popup.style.borderColor = '#cbd5e1';
+                            popup.style.color = '#334155';
+                            popup.style.transform = 'scale(1)';
+                            popup.innerHTML = `${iconSvg} <span class="addon-hc-text">Копировать ссылку на цитату</span>`;
+
+                            // Позиционируем прямо у курсора (чуть ниже и правее)
+                            let topPos = e.pageY + 12;
+                            let leftPos = e.pageX + 10;
+
+                            popup.style.display = 'flex';
+                            popup.style.top = topPos + 'px';
+                            popup.style.left = leftPos + 'px';
+
+                            // Делаем активным
+                            popup.style.opacity = '1';
+                            popup.style.pointerEvents = 'auto';
+                        }
+                    }
+                }
+            }, 10);
+        });
+
+        // Логика копирования
+        popup.addEventListener('click', (e) => {
+            e.stopPropagation();
+
+            let fragment = '';
+            // Форматируем текст для Chrome Text Fragments
+            // Если текст слишком длинный, берем первые и последние 5 слов, чтобы не ломать лимиты URL
+            const words = currentSelection.split(/\s+/);
+            if (words.length > 10) {
+                const start = words.slice(0, 5).join(' ');
+                const end = words.slice(-5).join(' ');
+                fragment = encodeURIComponent(start) + ',' + encodeURIComponent(end);
+            } else {
+                fragment = encodeURIComponent(currentSelection);
+            }
+
+            // Генерируем финальный URL без мусора
+            const baseUrl = window.location.href.split('#')[0];
+            const finalUrl = `${baseUrl}#${currentNoteId}:~:text=${fragment}`;
+
+            // Записываем в буфер обмена
+            navigator.clipboard.writeText(finalUrl).then(() => {
+                // Анимация успеха
+                popup.innerHTML = `${successSvg} <span class="addon-hc-text" style="color: #16a34a;">Скопировано!</span>`;
+                popup.style.backgroundColor = '#dcfce7';
+                popup.style.borderColor = '#86efac';
+                popup.style.transform = 'scale(1.05)';
+
+                // Скрываем и блокируем кнопку через секунду
+                setTimeout(() => {
+                    popup.style.opacity = '0';
+                    popup.style.pointerEvents = 'none';
+                    popup.style.transform = 'scale(1)';
+                }, 1000);
+            });
+        });
+    }
+
+
+
+
+
+
     function runAllLogic() {
         applyCustomBackground();
         initUI();
 
-        injectNewCardCSS(); 
+        injectNewCardCSS();
         // СНАЧАЛА подготавливаем все карточки
         applyEnhancements();
         injectDynamicPriorityStyles();
@@ -5679,6 +6255,8 @@ function openFiltersModal() {
 
         initFullscreenHotkey();
         initDeadlineTooltip();
+        initCommentPreview();
+        initHighlightCopier();
 
         parseAndTransformTable('issue_tree', 'addon-subtasks-list');
         parseAndTransformTable('relations', 'addon-relations-list');
