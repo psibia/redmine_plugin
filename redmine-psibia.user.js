@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.12
+// @version      1.3.13
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
 // @match        https://pm.isands.ru/*
-// @changelog    - Добавлены новые кнопки действий над задачей при открытии ее в модальном окне, изменена композиция\n- Добавлен предпросмотр комментариев при наведении на ссылку\n- Добавлена кнопка создания ссылки на цитату комментария при выделении текста\n<br><br><img src="https://pr.isands.ru/attachments/download/185576/ezgif-3f374a87751c7416.gif" style="max-width: 100%; border-radius: 6px; border: 1px solid #cbd5e1; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+// @changelog    - Исправлена ошибка (в ряде случаев не открывалось модальное окно предпросмотра при наведении курсора на ссылку с комментарием)\n- Исправлена ошибка, связанная с позиционированием экрана при открытии ссылки на комментарий\n- Добавлена анимация выделения цитаты при открытии ссылки на комментарий в новом окне
 // @grant        none
 // ==/UserScript==
 
@@ -1229,6 +1229,7 @@
                                 const newTabIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
                                 dropdown.appendChild(createDdItem(newTabIcon, 'Открыть в новой вкладке', '#334155', () => window.open(getIframeUrl(), '_blank')));
 
+                                // 3. Обновить страницу (Исправлено)
                                 const refreshIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
                                 dropdown.appendChild(createDdItem(refreshIcon, 'Обновить страницу', '#334155', () => {
                                     if (!modal.querySelector('.addon-loader')) {
@@ -1237,7 +1238,15 @@
                                         modal.appendChild(loader);
                                     }
                                     iframe.style.opacity = '0';
-                                    iframe.src = getIframeUrl();
+
+                                    // Если в URL есть хэш, простая перезапись не сработает (iframe.onload не вызовется)
+                                    // Поэтому заставляем iframe физически перезагрузиться через reload(true)
+                                    try {
+                                        iframe.contentWindow.location.reload(true);
+                                    } catch(e) {
+                                        // Защитный фолбэк
+                                        iframe.src = getIframeUrl().split('#')[0];
+                                    }
                                 }));
 
                                 dropdown.appendChild(createDivider());
@@ -5805,20 +5814,37 @@ function openFiltersModal() {
 
 
 
+
+
+
+
     // =================================================================================
-    // ПРЕДПРОСМОТР КОММЕНТАРИЕВ ПРИ НАВЕДЕНИИ
+    // ПРЕДПРОСМОТР КОММЕНТАРИЕВ ПРИ НАВЕДЕНИИ И ПЕРЕХОДЕ
     // =================================================================================
     function initCommentPreview() {
         if (window.addonCommentPreviewInitialized) return;
         window.addonCommentPreviewInitialized = true;
 
-        // Глобальный кэш в памяти браузера
+        if (!document.getElementById('addon-comment-preview-styles')) {
+            const style = document.createElement('style');
+            style.id = 'addon-comment-preview-styles';
+            style.textContent = `
+                @keyframes addonMarkPulse {
+                    0% { background-color: #f59e0b; color: #fff; box-shadow: 0 0 0 2px #f59e0b; }
+                    100% { background-color: #fef08a; color: #0f172a; box-shadow: 0 0 0 0 transparent; }
+                }
+                .addon-pulse-mark {
+                    animation: addonMarkPulse 1.5s ease-out forwards !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
         const topWin = window.top || window;
         topWin.addonCommentCache = topWin.addonCommentCache || new Map();
 
         const popup = document.createElement('div');
         popup.id = 'addon-comment-preview-popup';
-        // Без transition и opacity, мгновенное появление
         popup.style.cssText = `
             position: absolute;
             z-index: 100000;
@@ -5839,6 +5865,7 @@ function openFiltersModal() {
         let showTimer = null;
         let hideTimer = null;
 
+        // --- 1. ЛОГИКА НАВЕДЕНИЯ МЫШИ ---
         document.addEventListener('mouseover', (e) => {
             const a = e.target.closest('a');
             if (!a) return;
@@ -5851,12 +5878,9 @@ function openFiltersModal() {
 
             clearTimeout(hideTimer);
 
-            // Если навели на НОВУЮ ссылку
             if (activeLink !== a) {
                 activeLink = a;
                 clearTimeout(showTimer);
-
-                // Задержка 150мс
                 showTimer = setTimeout(() => {
                     showPreview(a, match[1], match[2], match[3]);
                 }, 150);
@@ -5884,12 +5908,147 @@ function openFiltersModal() {
             }, 100);
         });
 
+        // --- 2. ЛОГИКА КЛИКА ---
+        document.addEventListener('click', (e) => {
+            const a = e.target.closest('a');
+            if (!a) return;
+
+            const href = a.href;
+            if (!href) return;
+
+            const match = href.match(/\/issues\/(\d+)#note-(\d+)(?::~:text=(.*))?/);
+            if (!match) return;
+
+            const issueId = match[1];
+            const noteId = match[2];
+            const textFragment = match[3];
+
+            sessionStorage.setItem('addon_highlight_' + issueId, href);
+
+            const currentIssueMatch = window.location.href.match(/\/issues\/(\d+)/);
+            if (currentIssueMatch && currentIssueMatch[1] === issueId) {
+                const targetNote = document.getElementById('note-' + noteId);
+                const journal = targetNote ? targetNote.closest('.journal') : null;
+
+                if (journal) {
+                    e.preventDefault();
+
+                    popup.style.display = 'none';
+                    activeLink = null;
+                    history.pushState(null, null, href);
+
+                    document.querySelectorAll('mark.addon-highlight-mark').forEach(m => {
+                        const parent = m.parentNode;
+                        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+                        parent.removeChild(m);
+                    });
+
+                    if (textFragment) {
+                        applyHighlight(journal, textFragment, true);
+                        const firstMark = journal.querySelector('mark.addon-highlight-mark');
+                        if (firstMark) {
+                            firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            journal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    } else {
+                        journal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        const originalBg = journal.style.backgroundColor;
+                        journal.style.transition = 'background-color 0.4s ease';
+                        journal.style.backgroundColor = '#fef08a';
+
+                        setTimeout(() => {
+                            journal.style.backgroundColor = originalBg;
+                            setTimeout(() => journal.style.transition = '', 400);
+                        }, 1200);
+                    }
+                }
+            }
+        });
+
+        document.addEventListener('auxclick', (e) => {
+            const a = e.target.closest('a');
+            if (!a) return;
+            const href = a.href;
+            if (!href) return;
+            const match = href.match(/\/issues\/(\d+)#note-(\d+)(?::~:text=(.*))?/);
+            if (match) sessionStorage.setItem('addon_highlight_' + match[1], href);
+        });
+
+        // --- 3. ПРОВЕРКА ПРИ ЗАГРУЗКЕ СТРАНИЦЫ ---
+        function checkUrlOnLoad() {
+            let navUrl = window.location.href;
+            try {
+                const pEntries = performance.getEntriesByType("navigation");
+                if (pEntries.length > 0 && pEntries[0].name.includes(':~:text=')) navUrl = pEntries[0].name;
+            } catch(e){}
+
+            const issueMatch = navUrl.match(/\/issues\/(\d+)/);
+            if (!issueMatch) return;
+            const issueId = issueMatch[1];
+
+            const storedUrl = sessionStorage.getItem('addon_highlight_' + issueId);
+            if (storedUrl) {
+                navUrl = storedUrl;
+                sessionStorage.removeItem('addon_highlight_' + issueId);
+            }
+
+            const noteMatch = navUrl.match(/#note-(\d+)/);
+            if (noteMatch) {
+                const noteId = noteMatch[1];
+                let textFragment = null;
+                const textMatch = navUrl.match(/:~:text=(.*)/);
+
+                if (textMatch) {
+                    textFragment = textMatch[1];
+                    const cleanUrl = window.location.href.split(':~:text=')[0];
+                    history.replaceState(null, null, cleanUrl);
+                }
+
+                setTimeout(() => {
+                    const targetNote = document.getElementById('note-' + noteId);
+                    const journal = targetNote ? targetNote.closest('.journal') : null;
+                    if (journal) {
+                        document.querySelectorAll('mark.addon-highlight-mark').forEach(m => {
+                            const parent = m.parentNode;
+                            while (m.firstChild) parent.insertBefore(m.firstChild, m);
+                            parent.removeChild(m);
+                        });
+
+                        if (textFragment) {
+                            applyHighlight(journal, textFragment, true);
+                            setTimeout(() => {
+                                const firstMark = journal.querySelector('mark.addon-highlight-mark');
+                                if (firstMark) {
+                                    firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                } else {
+                                    journal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }, 50);
+                        } else {
+                            setTimeout(() => {
+                                journal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 50);
+
+                            const originalBg = journal.style.backgroundColor;
+                            journal.style.transition = 'background-color 0.4s ease';
+                            journal.style.backgroundColor = '#fef08a';
+                            setTimeout(() => {
+                                journal.style.backgroundColor = originalBg;
+                                setTimeout(() => journal.style.transition = '', 400);
+                            }, 1200);
+                        }
+                    }
+                }, 600);
+            }
+        }
+        checkUrlOnLoad();
+
         function positionPopup(targetEl) {
             popup.style.display = 'block';
             const rect = targetEl.getBoundingClientRect();
             const popupHeight = popup.offsetHeight;
             const popupWidth = popup.offsetWidth;
-
             const spaceBelow = window.innerHeight - rect.bottom;
             const spaceAbove = rect.top;
 
@@ -5918,7 +6077,6 @@ function openFiltersModal() {
                     Загрузка комментария...
                 </div>
             `;
-
             positionPopup(aEl);
 
             let doc;
@@ -5930,6 +6088,10 @@ function openFiltersModal() {
                     if (!res.ok) throw new Error('Ошибка сети');
                     const html = await res.text();
                     doc = new DOMParser().parseFromString(html, 'text/html');
+
+                    if (topWin.addonCommentCache.size > 20) {
+                        topWin.addonCommentCache.delete(topWin.addonCommentCache.keys().next().value);
+                    }
                     topWin.addonCommentCache.set(issueId, doc);
                 } catch (err) {
                     if (activeLink !== expectedLink) return;
@@ -5955,6 +6117,36 @@ function openFiltersModal() {
             const contextual = clone.querySelector('.contextual');
             if (contextual) contextual.remove();
 
+            // === ИДЕАЛЬНОЕ ИСПРАВЛЕНИЕ ВСЕХ СПОЙЛЕРОВ ===
+            clone.querySelectorAll('.collapsible').forEach(btn => {
+                const btnId = btn.getAttribute('id');
+                if (!btnId) return;
+
+                // Получаем базовый ID, отбрасывая суффиксы -show и -hide
+                const baseId = btnId.replace(/-show$/, '').replace(/-hide$/, '');
+                const targetDiv = clone.querySelector('#' + baseId);
+                const showBtn = clone.querySelector('#' + baseId + '-show');
+                const hideBtn = clone.querySelector('#' + baseId + '-hide');
+
+                btn.removeAttribute('onclick'); // убиваем старый jQuery-обработчик Redmine
+
+                btn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    if (targetDiv) {
+                        const isHidden = targetDiv.style.display === 'none';
+                        targetDiv.style.display = isHidden ? 'block' : 'none';
+
+                        if (showBtn) showBtn.style.display = isHidden ? 'none' : 'inline-block';
+                        if (hideBtn) hideBtn.style.display = isHidden ? 'inline-block' : 'none';
+                        // Заметь: мы БОЛЬШЕ НЕ ВЫЗЫВАЕМ positionPopup(), поэтому модалка стоит на месте!
+                    }
+                });
+            });
+
+            // ТОЛЬКО ПОСЛЕ привязки обработчиков очищаем ID, чтобы не ломать главную страницу
+            clone.removeAttribute('id');
+            clone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+
             clone.style.border = 'none';
             clone.style.margin = '0';
             clone.style.padding = '0';
@@ -5962,31 +6154,25 @@ function openFiltersModal() {
             popup.innerHTML = '';
             popup.appendChild(clone);
 
-            if (textFragment) applyHighlight(clone, textFragment);
+            if (textFragment) applyHighlight(clone, textFragment, false);
 
             positionPopup(aEl);
         }
 
-        function applyHighlight(element, fragment) {
+        function applyHighlight(element, fragment, animate = false) {
             try {
-                // Разделяем фрагмент до декодирования
                 const directives = fragment.split('&').map(d => d.replace(/^text=/, ''));
-
                 directives.forEach(directive => {
                     let terms = directive.split(',');
                     let textStart = '', textEnd = '';
 
-                    // Отсекаем префиксы и суффиксы Chrome
                     if (terms.length > 0 && terms[0].endsWith('-')) terms.shift();
                     if (terms.length > 0 && terms[terms.length - 1].startsWith('-')) terms.pop();
 
-                    // Декодируем
                     if (terms.length > 0) textStart = decodeURIComponent(terms[0]).replace(/\+/g, ' ').trim();
                     if (terms.length > 1) textEnd = decodeURIComponent(terms[1]).replace(/\+/g, ' ').trim();
-
                     if (!textStart) return;
 
-                    // Собираем весь текст в одну длинную строку (обходит разрывы тегов)
                     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
                     let node;
                     const textItems = [];
@@ -5994,22 +6180,12 @@ function openFiltersModal() {
 
                     while (node = walker.nextNode()) {
                         const val = node.nodeValue;
-                        textItems.push({
-                            node: node,
-                            start: fullText.length,
-                            end: fullText.length + val.length,
-                            text: val
-                        });
+                        textItems.push({ node: node, start: fullText.length, end: fullText.length + val.length, text: val });
                         fullText += val;
                     }
 
-                    // Умная регулярка, игнорирующая переносы строк и лишние пробелы
-                    const buildFuzzyRegex = (str) => {
-                        return new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'is');
-                    };
-
-                    const startRegex = buildFuzzyRegex(textStart);
-                    const startMatch = startRegex.exec(fullText);
+                    const buildFuzzyRegex = (str) => new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'is');
+                    const startMatch = buildFuzzyRegex(textStart).exec(fullText);
                     if (!startMatch) return;
 
                     let highlightStart = startMatch.index;
@@ -6019,67 +6195,55 @@ function openFiltersModal() {
                         const endRegex = buildFuzzyRegex(textEnd);
                         endRegex.lastIndex = highlightStart;
                         const endMatch = endRegex.exec(fullText);
-                        if (endMatch) {
-                            highlightEnd = endMatch.index + endMatch[0].length;
-                        }
+                        if (endMatch) highlightEnd = endMatch.index + endMatch[0].length;
                     }
 
-                    // Находим и оборачиваем нужные текстовые узлы
                     const nodesToWrap = [];
                     for (let i = 0; i < textItems.length; i++) {
                         const item = textItems[i];
                         if (item.end > highlightStart && item.start < highlightEnd) {
-                            const overlapStart = Math.max(0, highlightStart - item.start);
-                            const overlapEnd = Math.min(item.text.length, highlightEnd - item.start);
                             nodesToWrap.push({
                                 node: item.node,
-                                startOffset: overlapStart,
-                                endOffset: overlapEnd
+                                startOffset: Math.max(0, highlightStart - item.start),
+                                endOffset: Math.min(item.text.length, highlightEnd - item.start)
                             });
                         }
                     }
 
-                    // Режем с конца
                     nodesToWrap.reverse().forEach(wrapInfo => {
                         let n = wrapInfo.node;
-                        if (wrapInfo.endOffset < n.nodeValue.length) {
-                            n.splitText(wrapInfo.endOffset);
-                        }
-                        if (wrapInfo.startOffset > 0) {
-                            n = n.splitText(wrapInfo.startOffset);
-                        }
+                        if (wrapInfo.endOffset < n.nodeValue.length) n.splitText(wrapInfo.endOffset);
+                        if (wrapInfo.startOffset > 0) n = n.splitText(wrapInfo.startOffset);
 
                         if (n.nodeValue.trim().length > 0) {
                             const mark = document.createElement('mark');
+                            mark.className = 'addon-highlight-mark';
+                            if (animate) mark.classList.add('addon-pulse-mark');
                             mark.style.backgroundColor = '#fef08a';
                             mark.style.color = '#0f172a';
                             mark.style.borderRadius = '2px';
-                            // НИКАКИХ box-shadow И padding! Строки не будут накладываться
                             n.parentNode.insertBefore(mark, n);
                             mark.appendChild(n);
                         }
                     });
                 });
 
-                // БЕЗОПАСНЫЙ СКРОЛЛ
                 setTimeout(() => {
-                    const firstMark = element.querySelector('mark');
+                    const firstMark = element.querySelector('mark.addon-highlight-mark');
                     const popupEl = document.getElementById('addon-comment-preview-popup');
-                    if (firstMark && popupEl) {
+                    if (firstMark && popupEl && popupEl.contains(firstMark)) {
                         const markRect = firstMark.getBoundingClientRect();
                         const popupRect = popupEl.getBoundingClientRect();
-
-                        // Скроллим ТОЛЬКО внутренний контейнер iframe-окна
-                        const scrollOffset = (markRect.top - popupRect.top) - (popupRect.height / 2) + (markRect.height / 2);
-                        popupEl.scrollTop += scrollOffset;
+                        popupEl.scrollTop += (markRect.top - popupRect.top) - (popupRect.height / 2) + (markRect.height / 2);
                     }
                 }, 10);
-
-            } catch (e) {
-                console.error("Highlighter error:", e);
-            }
+            } catch (e) { console.error("Highlighter error:", e); }
         }
     }
+
+
+
+
 
 
 
