@@ -2600,8 +2600,9 @@ function updateFiltersTriggerBadge() {
             }
         }
 
-        if ("избранное".startsWith(termLower) || termLower === '⭐ избранное') {
-            suggestions.push({ type: 'filter', text: '⭐ Избранное', label: '⭐ Избранные задачи' });
+        if ("избранное".startsWith(termLower) || termLower === 'избранное') {
+            const favSvgLabel = `<svg width="14" height="14" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg> Избранные задачи`;
+            suggestions.push({ type: 'favorites_filter', text: 'Избранное', label: favSvgLabel });
         }
 
         document.querySelectorAll('.rdb-issue').forEach(card => {
@@ -2800,7 +2801,7 @@ function updateFiltersTriggerBadge() {
                             const cleanVal = hit.text.replace('⏰', '').trim();
                             if (!activeFilters.deadlines.includes(cleanVal)) activeFilters.deadlines.push(cleanVal);
                             input.value = ''; clearBtn.style.display = 'none';
-                        } else if (hit.type === 'filter' && hit.text.includes('⭐')) {
+                        } else if (hit.type === 'favorites_filter') {
                             activeFilters.onlyFavorites = true;
                             input.value = ''; clearBtn.style.display = 'none';
                         } else {
@@ -2894,7 +2895,7 @@ function updateFiltersTriggerBadge() {
                         const cleanVal = hit.text.replace('⏰', '').trim();
                         if (!activeFilters.deadlines.includes(cleanVal)) activeFilters.deadlines.push(cleanVal);
                         input.value = ''; clearBtn.style.display = 'none';
-                    } else if (hit.type === 'filter' && hit.text.includes('⭐')) {
+                    } else if (hit.type === 'favorites_filter') {
                         activeFilters.onlyFavorites = true;
                         input.value = ''; clearBtn.style.display = 'none';
                     } else {
@@ -3104,7 +3105,9 @@ function updateFiltersTriggerBadge() {
                 activeFilters.statuses.forEach(s => html += `<div class="addon-filter-tag" title="${s}">📌 ${s} <span class="addon-filter-tag-close" onclick="event.stopPropagation(); window.removeActiveSearchTag('statuses', '${s}')">×</span></div>`);
                 activeFilters.priorities.forEach(p => html += `<div class="addon-filter-tag" title="${p}">⚡ ${p} <span class="addon-filter-tag-close" onclick="event.stopPropagation(); window.removeActiveSearchTag('priorities', '${p}')">×</span></div>`);
                 activeFilters.deadlines.forEach(d => html += `<div class="addon-filter-tag" title="${d}">⏰ ${d} <span class="addon-filter-tag-close" onclick="event.stopPropagation(); window.removeActiveSearchTag('deadlines', '${d}')">×</span></div>`);
-                if (activeFilters.onlyFavorites) html += `<div class="addon-filter-tag">⭐ Избр. <span class="addon-filter-tag-close" onclick="event.stopPropagation(); window.removeActiveSearchTag('fav', '')">×</span></div>`;
+                if (activeFilters.onlyFavorites) {
+                    html += `<div class="addon-filter-tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px;"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg> Избранные <span class="addon-filter-tag-close" onclick="event.stopPropagation(); window.removeActiveSearchTag('fav', '')">×</span></div>`;
+                }
                 html += '</div>';
                 return html;
             };
@@ -6814,6 +6817,7 @@ function openFiltersModal() {
 
 
 
+
 // =================================================================================
     // СИСТЕМА ЛОКАЛЬНЫХ ЗАМЕТОК К ЗАДАЧАМ С АВТОСОХРАНЕНИЕМ И ТЕГАМИ
     // =================================================================================
@@ -6831,14 +6835,31 @@ function openFiltersModal() {
         return notes[taskId] || '';
     };
 
+    window.addonGetTaskNoteMeta = (taskId) => {
+        let meta = JSON.parse(localStorage.getItem('addon_task_notes_meta') || '{}');
+        return meta[taskId] || null;
+    };
+
     window.addonSetTaskNote = (taskId, text) => {
         let notes = JSON.parse(localStorage.getItem('addon_task_notes') || '{}');
+        let meta = JSON.parse(localStorage.getItem('addon_task_notes_meta') || '{}');
+        const now = Date.now();
+
         if (text.trim() === '') {
             delete notes[taskId];
+            delete meta[taskId];
         } else {
+            if (!notes[taskId]) {
+                meta[taskId] = { created: now, edits: [] };
+            } else if (notes[taskId] !== text.trim()) {
+                if (!meta[taskId]) meta[taskId] = { created: now, edits: [] };
+                if (!meta[taskId].edits) meta[taskId].edits = [];
+                meta[taskId].edits.push(now);
+            }
             notes[taskId] = text.trim();
         }
         localStorage.setItem('addon_task_notes', JSON.stringify(notes));
+        localStorage.setItem('addon_task_notes_meta', JSON.stringify(meta));
     };
 
     window.addonGetNoteTags = () => {
@@ -6869,13 +6890,13 @@ function openFiltersModal() {
 
     // --- ПАЛИТРА 7 ЦВЕТОВ ---
     const DEFAULT_PALETTE = {
-        c1: '#ef4444', // Красный (Приоритет/Блокер)
-        c2: '#f97316', // Оранжевый (Средний)
-        c3: '#10b981', // Зеленый (Успех/Фокус)
-        c4: '#3b82f6', // Синий (Базовый дефолт)
-        c5: '#8b5cf6', // Фиолетовый
-        c6: '#ec4899', // Розовый
-        c7: '#475569'  // Грифельно-серый (Обычный шрифт)
+        c1: '#ef4444',
+        c2: '#f97316',
+        c3: '#10b981',
+        c4: '#3b82f6',
+        c5: '#8b5cf6',
+        c6: '#ec4899',
+        c7: '#475569'
     };
 
     window.addonGetCustomPalette = () => {
@@ -6912,6 +6933,20 @@ function openFiltersModal() {
     function initNotePopupSystem() {
         if (document.getElementById('addon-note-popup-container')) return;
 
+        const formatMetaDate = (ts) => {
+            const d = new Date(ts);
+            const days = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+            const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+            const dayName = days[d.getDay()];
+            const dayNum = d.getDate();
+            const monthName = months[d.getMonth()];
+            const HH = String(d.getHours()).padStart(2, '0');
+            const MM = String(d.getMinutes()).padStart(2, '0');
+
+            return `${dayName}, ${dayNum} ${monthName} ${HH}:${MM}`;
+        };
+
         const style = document.createElement('style');
         style.textContent = `
             @keyframes addonNoteZoomIn {
@@ -6924,9 +6959,20 @@ function openFiltersModal() {
                 padding: 16px; width: 300px; display: none; flex-direction: column; gap: 10px; font-family: 'Inter', sans-serif;
             }
             .addon-note-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; }
-            .addon-note-title { font-size: 12px; font-weight: 600; color: #475569; display: flex; align-items: center; gap: 6px; }
+            .addon-note-title { font-size: 12px; font-weight: 600; color: #475569; display: flex; align-items: center; gap: 6px; line-height: 1; }
 
-            /* --- ЕДИНЫЙ БЛОК ДЛЯ МНОГОСТРОЧНЫХ ТЕГОВ --- */
+            /* История изменений */
+            #addon-note-history-dropdown {
+                position: absolute; top: 100%; left: 0; margin-top: 6px;
+                background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+                padding: 10px 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+                z-index: 100030; display: none; flex-direction: column; gap: 4px;
+                min-width: 190px; max-height: 160px; overflow-y: auto; cursor: default;
+                font-family: 'Inter', sans-serif; font-size: 11px; color: #475569;
+            }
+            #addon-note-history-dropdown::-webkit-scrollbar { width: 4px; }
+            #addon-note-history-dropdown::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
             .addon-note-hashtag {
                 display: inline;
                 background: #f8fafc; color: var(--hash-text, #3b82f6);
@@ -6934,14 +6980,13 @@ function openFiltersModal() {
                 padding: 3px 6px; border-radius: 6px; font-weight: 600; font-size: 11px;
                 transition: padding 0.15s, margin 0.15s, background 0.15s, border-color 0.15s;
                 cursor: default;
-                margin: 0 20px 0 2px; /* Резерв только в конце тега (благодаря slice) */
+                margin: 0 20px 0 2px;
                 word-break: break-word; line-height: 2.2;
-                /* Убрано свойство clone, теперь это единая плашка обрамляющая текст */
             }
             .addon-note-hashtag:hover {
                 background: #f1f5f9; border-color: #cbd5e1;
                 padding-right: 22px;
-                margin-right: 4px; /* Нулевое смещение, текст стоит монолитно */
+                margin-right: 4px;
             }
             .addon-note-hashtag .remove-text-tag {
                 display: inline-block;
@@ -6998,7 +7043,6 @@ function openFiltersModal() {
             .addon-tag-add:hover { border-color: #94a3b8; color: #334155; background: #f8fafc; }
             .addon-tag-input { font-size: 11px; padding: 3px 8px; border: 1px solid #3b82f6; border-radius: 6px; outline: none; width: 80px; display: none; font-family: 'Inter', sans-serif; font-weight: 500; color: #0f172a;}
 
-            /* Сетка выбора цвета (Быстрое меню) */
             .addon-color-picker-popup {
                 position: absolute; z-index: 100020; background: #fff; border: 1px solid #cbd5e1;
                 border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 8px;
@@ -7011,7 +7055,6 @@ function openFiltersModal() {
             }
             .addon-color-circle:hover { transform: scale(1.15); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
-            /* Стили окна глобальных настроек палитры */
             .addon-settings-grid {
                 display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; margin-top: 4px; padding: 4px 10px;
             }
@@ -7025,7 +7068,6 @@ function openFiltersModal() {
             .addon-color-input-wrapper {
                 display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #f8fafc; padding: 12px 14px; border-radius: 8px; border: 1px solid #e2e8f0;
             }
-
             .addon-native-color-input {
                 -webkit-appearance: none; -moz-appearance: none; appearance: none;
                 width: 36px; height: 36px; border: none; padding: 0; cursor: pointer; background: transparent; border-radius: 8px; outline: none;
@@ -7033,7 +7075,6 @@ function openFiltersModal() {
             .addon-native-color-input::-webkit-color-swatch-wrapper { padding: 0; }
             .addon-native-color-input::-webkit-color-swatch { border: 1px solid rgba(0,0,0,0.15); border-radius: 8px; }
             .addon-native-color-input::-moz-color-swatch { border: 1px solid rgba(0,0,0,0.15); border-radius: 8px; }
-
             .addon-color-hex-input {
                 font-family: monospace; font-size: 13px; color: #334155; font-weight: 600; text-transform: uppercase;
                 background: #fff; padding: 6px 8px; border-radius: 6px; border: 1px solid #cbd5e1; width: 75px;
@@ -7048,10 +7089,19 @@ function openFiltersModal() {
         popup.dataset.mode = 'normal';
         popup.innerHTML = `
             <div id="addon-note-header-normal" class="addon-note-header">
-                <span class="addon-note-title">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    ЗАМЕТКА
-                </span>
+                <div style="display: flex; align-items: flex-end; gap: 6px;">
+                    <span class="addon-note-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                        ЗАМЕТКА
+                    </span>
+                    <div id="addon-note-timestamp-container" style="position: relative; display: none; align-items: flex-end; gap: 2px; font-size: 10px; color: #94a3b8; font-weight: 500; user-select: none; line-height: 1;">
+                        <span id="addon-note-timestamp-text"></span>
+                        <div id="addon-note-history-dropdown"></div>
+                    </div>
+                    <div id="addon-note-timestamp-arrow" style="cursor: pointer; display: none; padding: 2px 0 0 2px; color: #64748b; transition: color 0.2s; line-height: 1;" title="История изменений">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display: block;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                </div>
                 <svg id="addon-note-delete" style="cursor: pointer; color: #ef4444; transition: all 0.2s;" title="Удалить заметку" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </div>
 
@@ -7079,6 +7129,51 @@ function openFiltersModal() {
         let hideTimer = null;
         let selectedSettingsColorKey = 'c1';
 
+        const historyArrow = popup.querySelector('#addon-note-timestamp-arrow');
+        const historyDrop = popup.querySelector('#addon-note-history-dropdown');
+
+        historyArrow.onclick = (e) => {
+            e.stopPropagation();
+            historyDrop.style.display = historyDrop.style.display === 'flex' ? 'none' : 'flex';
+        };
+
+        const renderNoteMeta = (taskId) => {
+            const meta = window.addonGetTaskNoteMeta(taskId);
+            const container = popup.querySelector('#addon-note-timestamp-container');
+            const textEl = popup.querySelector('#addon-note-timestamp-text');
+            const arrowEl = popup.querySelector('#addon-note-timestamp-arrow');
+            const dropEl = popup.querySelector('#addon-note-history-dropdown');
+
+            if (!meta || (!meta.created && !meta.edits?.length)) {
+                container.style.display = 'none';
+                arrowEl.style.display = 'none';
+                dropEl.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'flex';
+            let latestTs = meta.created;
+            const hasEdits = meta.edits && meta.edits.length > 0;
+
+            if (hasEdits) {
+                latestTs = meta.edits[meta.edits.length - 1];
+                textEl.textContent = `ред. ${formatMetaDate(latestTs)}`;
+                arrowEl.style.display = 'flex';
+
+                let historyHtml = `<div style="font-size:10px; text-transform:uppercase; color:#94a3b8; margin-bottom:6px; font-weight:700;">История изменений</div>`;
+                historyHtml += `<div style="display:flex; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:1px solid #f1f5f9;"><span>Создано:</span><span style="font-weight:600; white-space:nowrap;">${formatMetaDate(meta.created)}</span></div>`;
+
+                [...meta.edits].reverse().forEach((ts, idx) => {
+                    historyHtml += `<div style="display:flex; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:1px solid #f1f5f9;"><span>Ред. ${meta.edits.length - idx}:</span><span style="font-weight:600; white-space:nowrap;">${formatMetaDate(ts)}</span></div>`;
+                });
+                dropEl.innerHTML = historyHtml;
+            } else {
+                textEl.textContent = `${formatMetaDate(latestTs)}`;
+                arrowEl.style.display = 'none';
+                dropEl.style.display = 'none';
+            }
+        };
+
         popup.addEventListener('mouseenter', () => clearTimeout(hideTimer));
         popup.addEventListener('mouseleave', () => {
             const editMode = popup.querySelector('#addon-note-edit-mode');
@@ -7086,7 +7181,10 @@ function openFiltersModal() {
             const colorPicker = document.getElementById('addon-tag-color-picker');
 
             if (editMode.style.display !== 'flex' && settingsMode.style.display !== 'flex' && (!colorPicker || colorPicker.style.display === 'none')) {
-                hideTimer = setTimeout(() => popup.style.display = 'none', 150);
+                hideTimer = setTimeout(() => {
+                    popup.style.display = 'none';
+                    if (historyDrop) historyDrop.style.display = 'none';
+                }, 150);
             }
         });
 
@@ -7101,7 +7199,12 @@ function openFiltersModal() {
                 if (window.addonRenderBoardStars) window.addonRenderBoardStars();
                 if (window.addonUpdateModalFavWidgets) window.addonUpdateModalFavWidgets(currentTaskId);
             }
-            if (!keepOpen) popup.style.display = 'none';
+            if (keepOpen) {
+                renderNoteMeta(currentTaskId);
+            } else {
+                popup.style.display = 'none';
+                if (historyDrop) historyDrop.style.display = 'none';
+            }
         };
 
         document.addEventListener('mousedown', (e) => {
@@ -7111,6 +7214,8 @@ function openFiltersModal() {
 
                 if (popup.dataset.mode === 'settings') switchMode('edit');
                 saveNote();
+            } else if (historyDrop && historyDrop.style.display === 'flex' && !historyDrop.contains(e.target) && !historyArrow.contains(e.target)) {
+                historyDrop.style.display = 'none';
             }
         });
 
@@ -7188,13 +7293,11 @@ function openFiltersModal() {
                 updateViewModeContent();
             };
 
-            // ЛЕГКОЕ ОБНОВЛЕНИЕ: Только визуал, без пересохранений (убирает тормоза пипетки)
             colorInput.addEventListener('input', (e) => {
                 hexInput.value = e.target.value;
                 container.querySelector(`.addon-settings-circle[data-key="${selectedSettingsColorKey}"]`).style.backgroundColor = e.target.value;
             });
 
-            // ТЯЖЕЛОЕ ОБНОВЛЕНИЕ: Сохранение и перерисовка DOM только когда юзер закончил выбирать цвет
             colorInput.addEventListener('change', (e) => {
                 updateColor(e.target.value);
             });
@@ -7492,6 +7595,7 @@ function openFiltersModal() {
             textarea.value = text;
             renderTags();
             updateViewModeContent();
+            renderNoteMeta(taskId);
 
             switchMode(forceEdit || !text ? 'edit' : 'view');
 
@@ -7577,12 +7681,13 @@ function openFiltersModal() {
             const colorPicker = document.getElementById('addon-tag-color-picker');
 
             if (editMode && editMode.style.display !== 'flex' && settingsMode && settingsMode.style.display !== 'flex' && (!colorPicker || colorPicker.style.display === 'none')) {
-                hideTimer = setTimeout(() => popup.style.display = 'none', 150);
+                hideTimer = setTimeout(() => {
+                    popup.style.display = 'none';
+                    if (historyDrop) historyDrop.style.display = 'none';
+                }, 150);
             }
         };
     }
-
-
 
 
 
