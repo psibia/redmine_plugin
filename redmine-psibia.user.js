@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Redmine from psibia
 // @namespace    http://tampermonkey.net/
-// @version      1.3.13
+// @version      1.3.15
 // @description  Redmine plus (Loader)
 // @author       psibia.p
 // @match        https://pr.isands.ru/*
 // @match        https://pm.isands.ru/*
-// @changelog    - Исправлена ошибка, из-за которой в ряде случаев не открывалось модальное окно предпросмотра при наведении курсора на ссылку с комментарием\n- Исправлена ошибка, связанная с позиционированием экрана при открытии ссылки на комментарий\n- Добавлена анимация выделения цитаты при открытии ссылки на комментарий в новом окне
+// @changelog    - Внедрена продвинутая система персональных заметок к задачам. Доступна через контекстное меню на карточке задачи (ПКМ ➔ "Добавить/Изменить заметку") или при клике на иконку комментария. Поддерживается использование тегов (кнопка "+ новый"). Добавлена визуальная кастомизация: тегам можно назначать цвета из палитры или задавать собственные HEX-коды (окно настроек открывается по клику на шестеренку при выборе цвета тега).\n- Добавлена расширенная аналитика для избранных задач: при наведении на иконку избранного на карточке теперь отображается подробный тултип с точной датой и временем добавления задачи в список.\n- Существенно расширена логика фильтрации доски (идеально для проведения дейликов). Внедрен глубокий трекинг маршрута задач на основе вашего списка избранного. Если вы отфильтровали доску по конкретному сотруднику, система покажет транзитные изменения: опция "Показывать переназначенные" оставляет на экране полупрозрачные карточки с оранжевой стрелочкой (показывает задачи, которые сотрудник передал другому исполнителю), а новая опция "Подсвечивать принятые" маркирует карточки зеленой стрелочкой (подсвечивает входящие задачи, переданные от других коллег). Все индикаторы оснащены подробными всплывающими тултипами при наведении. Управление функциями доступно в расширенном меню фильтров доски (раздел "Исполнители" ➔ "Дополнительные опции").
 // @grant        none
 // ==/UserScript==
 
@@ -14,7 +14,7 @@
     'use strict';
 
     // =================================================================================
-    // ЧАСТЬ 1: UI, МОДАЛЬНОЕ ОКНО И ЛОГИКА 
+    // ЧАСТЬ 1: UI, МОДАЛЬНОЕ ОКНО И ЛОГИКА
     // =================================================================================
 
     const deadlineRegex = /(Deadline:|до)\s*(\d{2})\.(\d{2})\.(\d{4})/i; // регулярка для поиска дедлайна или срока завершения в карточках на доске, надо протестить, но вроде формат всегда такой
@@ -639,46 +639,128 @@
         });
     }
 
-    // отрисовка флажков на карточках
-    function initFavoriteStars() {
-        const FAV_KEY = 'addon_favorite_tasks';
-        const getFavs = () => JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
 
-        function renderStars() {
-            const favs = getFavs();
+
+
+
+
+    // =================================================================================
+    // Отрисовка флажков и стикеров на карточках
+    // =================================================================================
+    function initFavoriteStars() {
+        window.addonRenderBoardStars = function() {
+            const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
             const cards = document.querySelectorAll('.rdb-card');
 
             cards.forEach(card => {
                 const idLink = card.querySelector('.rdb-menu-link');
                 if (!idLink) return;
                 const taskId = idLink.textContent.trim().replace('#', '');
-                const isFav = favs.some(f => f.id === taskId);
+
+                const favItem = favs.find(f => f.id === taskId);
+                const isFav = !!favItem;
+                const noteText = window.addonGetTaskNote ? window.addonGetTaskNote(taskId) : '';
 
                 const topRightContainer = card.querySelector('.c-card-top-right');
                 if (!topRightContainer) return;
 
-                let starEl = topRightContainer.querySelector('.addon-fav-star-container');
+                let starContainer = topRightContainer.querySelector('.addon-fav-star-container');
 
-                if (isFav) {
-                    if (!starEl) {
-                        starEl = document.createElement('div');
-                        starEl.className = 'addon-fav-star-container';
-                        // Цвет закладки #ef4444
-                        starEl.style.cssText = 'display: flex; align-items: center; color: #ef4444; cursor: pointer; padding: 2px;';
-                        // Новая иконка (сплошная заливка)
-                        starEl.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+                if (isFav || noteText) {
+                    if (!starContainer) {
+                        starContainer = document.createElement('div');
+                        starContainer.className = 'addon-fav-star-container';
+                        starContainer.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+                        topRightContainer.appendChild(starContainer);
+                    }
 
-                        topRightContainer.appendChild(starEl);
+                    const stateKey = `fav:${isFav}_note:${!!noteText}_ts:${isFav ? favItem.timestamp : '0'}`;
+
+                    if (starContainer.getAttribute('data-state') !== stateKey) {
+                        starContainer.setAttribute('data-state', stateKey);
+
+                        // ИКОНКА ЗАМЕТКИ С ЗАЛИВКОЙ
+                        const noteHtml = noteText
+                            ? `<div class="addon-fav-note-indicator" style="cursor: pointer; display: flex; align-items: center; color: #ef4444; padding: 2px;">
+                                   <svg width="15" height="15" viewBox="0 0 24 24" fill="transparent" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                               </div>`
+                            : '';
+
+                        let favHtml = '';
+                        let tooltipText = '';
+
+                       if (isFav) {
+                            const dateObj = new Date(favItem.timestamp);
+                            const weekday = dateObj.toLocaleDateString('ru-RU', { weekday: 'long' });
+                            const day = String(dateObj.getDate()).padStart(2, '0');
+                            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                            const year = dateObj.getFullYear();
+                            const hours = String(dateObj.getHours()).padStart(2, '0');
+                            const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+
+                            tooltipText = `Добавлено: ${weekday}, ${day}-${month}-${year}, ${hours}:${minutes}`;
+                            favHtml = `<div class="addon-fav-star-icon" data-tooltip="${tooltipText}" style="color: #ef4444; cursor: pointer; padding: 2px;">
+                                   <svg width="16" height="16" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+                               </div>`;
+                        }
+
+                        starContainer.innerHTML = noteHtml + favHtml;
+
+                        const noteIndicator = starContainer.querySelector('.addon-fav-note-indicator');
+                        if (noteIndicator) {
+                            noteIndicator.addEventListener('mouseenter', () => {
+                                if (window.addonShowNotePopup) window.addonShowNotePopup(taskId, noteIndicator, false);
+                            });
+                            noteIndicator.addEventListener('mouseleave', () => {
+                                if (window.addonHideNotePopupDelayed) window.addonHideNotePopupDelayed();
+                            });
+                        }
+
+                        const starIcon = starContainer.querySelector('.addon-fav-star-icon');
+                        if (starIcon) {
+                            const positionStarTooltip = (e) => {
+                                const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                if (!tooltipEl) return;
+                                let left = e.clientX + 10;
+                                let top = e.clientY + 15;
+                                const rect = tooltipEl.getBoundingClientRect();
+                                if (left + rect.width > window.innerWidth) left = e.clientX - rect.width - 10;
+                                if (top + rect.height > window.innerHeight) top = e.clientY - rect.height - 10;
+                                tooltipEl.style.left = left + 'px';
+                                tooltipEl.style.top = top + 'px';
+                            };
+
+                            starIcon.addEventListener('mouseenter', (e) => {
+                                const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                if (tooltipEl) {
+                                    tooltipEl.innerHTML = starIcon.getAttribute('data-tooltip');
+                                    tooltipEl.style.display = 'block';
+                                    positionStarTooltip(e);
+                                }
+                            });
+
+                            starIcon.addEventListener('mousemove', (e) => {
+                                const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                if (tooltipEl && tooltipEl.style.display === 'block') positionStarTooltip(e);
+                            });
+
+                            starIcon.addEventListener('mouseleave', () => {
+                                const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                if (tooltipEl) tooltipEl.style.display = 'none';
+                            });
+                        }
                     }
                 } else {
-                    if (starEl) starEl.remove();
+                    if (starContainer) starContainer.remove();
                 }
             });
-        }
+        };
 
-        renderStars();
-        return renderStars;
+        window.addonRenderBoardStars();
+        return window.addonRenderBoardStars;
     }
+
+
 
 
 
@@ -777,48 +859,76 @@
         editBtn.style.display = 'none';
         buttonContainer.appendChild(editBtn);
 
+        // Обновлятор состояния кнопок в модалке (вызывается динамически)
+        window.addonUpdateModalFavWidgets = function(taskId) {
+            const fBtn = document.getElementById('addon-modal-fav-btn');
+            const nBtn = document.getElementById('addon-modal-note-btn');
+            if (!fBtn || !nBtn) return;
+
+            const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
+            const isFav = favs.some(f => f.id === taskId);
+            const noteText = window.addonGetTaskNote ? window.addonGetTaskNote(taskId) : '';
+
+            if (isFav) {
+                fBtn.title = 'Убрать из избранного';
+                fBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+            } else {
+                fBtn.title = 'Добавить в избранное';
+                fBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+            }
+
+            nBtn.style.display = 'flex'; // Кнопка заметки доступна всегда
+            if (noteText) {
+                nBtn.title = 'Изменить заметку';
+                nBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+            } else {
+                nBtn.title = 'Добавить заметку';
+                nBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+            }
+        };
+
         // 3. КНОПКА "ИЗБРАННОЕ"
-        buttonContainer.appendChild(createBtn(
-            '',
-            'Добавить в избранное',
-            (e, btn) => {
-                if (!activeIssueId) return;
+        const favBtn = createBtn('', 'Добавить в избранное', (e, btn) => {
+            if (!activeIssueId) return;
+            const FAV_KEY = 'addon_favorite_tasks';
+            let favs = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+            const existingFav = favs.find(f => f.id === activeIssueId);
 
-                const FAV_KEY = 'addon_favorite_tasks';
-                let favs = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
-                const isFav = favs.some(f => f.id === activeIssueId);
+            const projectSpan = document.querySelector('.current-project');
+            const projectName = projectSpan ? projectSpan.textContent.trim() : 'Глобальный';
+            let assignee = 'Не назначен'; let title = 'Без названия';
+            let taskUrl = window.location.origin + '/issues/' + activeIssueId;
 
-                const projectSpan = document.querySelector('.current-project');
-                const projectName = projectSpan ? projectSpan.textContent.trim() : 'Глобальный';
+            if (activeSourceElement) {
+                assignee = activeSourceElement.querySelector('.rdb-property-assignee')?.textContent.trim() || assignee;
+                title = activeSourceElement.querySelector('.rdb-property-subject')?.textContent.trim() || activeSourceElement.querySelector('.c-card-desc')?.textContent.trim() || title;
+            }
 
-                let assignee = 'Не назначен';
-                let title = 'Без названия';
-                let taskUrl = window.location.origin + '/issues/' + activeIssueId;
+            if (!existingFav) {
+                favs.push({
+                    id: activeIssueId, project: projectName, assignee: assignee,
+                    savedAssignee: assignee, title: title, url: taskUrl, timestamp: new Date().getTime()
+                });
+            } else {
+                favs = favs.filter(f => f.id !== activeIssueId);
+            }
 
-                if (activeSourceElement) {
-                    assignee = activeSourceElement.querySelector('.rdb-property-assignee')?.textContent.trim() || assignee;
-                    title = activeSourceElement.querySelector('.rdb-property-subject')?.textContent.trim() || activeSourceElement.querySelector('.c-card-desc')?.textContent.trim() || title;
-                }
+            localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+            if (window.addonRenderBoardStars) window.addonRenderBoardStars();
 
-                if (!isFav) {
-                    favs.push({ id: activeIssueId, project: projectName, assignee: assignee, title: title, url: taskUrl, timestamp: new Date().getTime() });
-                } else {
-                    favs = favs.filter(f => f.id !== activeIssueId);
-                }
+            btn.style.transform = 'scale(1.2)';
+            setTimeout(() => btn.style.transform = 'scale(1)', 150);
 
-                localStorage.setItem(FAV_KEY, JSON.stringify(favs));
-                if (typeof updateStars === 'function') updateStars();
+            window.addonUpdateModalFavWidgets(activeIssueId);
+        }, 'addon-modal-fav-btn');
+        buttonContainer.appendChild(favBtn);
 
-                const nowFav = !isFav;
-                btn.title = nowFav ? 'Убрать из избранного' : 'Добавить в избранное';
-
-                btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${nowFav ? '#ef4444' : 'none'}" stroke="${nowFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
-
-                btn.style.transform = 'scale(1.2)';
-                setTimeout(() => btn.style.transform = 'scale(1)', 150);
-            },
-            'addon-modal-fav-btn'
-        ));
+        // 3.5 КНОПКА ЗАМЕТКИ (СИНХРОНИЗИРОВАНА)
+        const noteBtn = createBtn('', 'Заметка', (e, btn) => {
+            if (!activeIssueId) return;
+            if (window.addonShowNotePopup) window.addonShowNotePopup(activeIssueId, btn, true);
+        }, 'addon-modal-note-btn');
+        buttonContainer.appendChild(noteBtn);
 
         // 4. КНОПКА "КОПИРОВАТЬ ССЫЛКУ" (ВЫНЕСЕНА СЮДА)
         buttonContainer.appendChild(createBtn(
@@ -1145,17 +1255,7 @@
                             activeIssueId = null;
                         }
 
-                        if (favBtn) {
-                            if (activeIssueId) {
-                                const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
-                                const isFav = favs.some(f => f.id === activeIssueId);
-                                favBtn.title = isFav ? 'Убрать из избранного' : 'Добавить в избранное';
-                                favBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="${isFav ? '#ef4444' : 'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
-                                favBtn.style.display = 'flex';
-                            } else {
-                                favBtn.style.display = 'none';
-                            }
-                        }
+                        if (window.addonUpdateModalFavWidgets) window.addonUpdateModalFavWidgets(activeIssueId);
 
                         if (copyLinkBtn) {
                             copyLinkBtn.style.display = activeIssueId ? 'flex' : 'none';
@@ -2237,74 +2337,215 @@
 
 
 
-    //функция внедрения кнопок (очищенная, только контейнер)
     // =================================================================================
-    // ЧАСТЬ 3: СТРОКА ПОИСКА НА ДОСКЕ
+    // ЧАСТЬ 3: СТРОКА ПОИСКА И ФИЛЬТРЫ НА ДОСКЕ (С ПОДДЕРЖКОЙ КАРТОЧЕК-ПРИЗРАКОВ)
+    // =================================================================================
+
+    // =================================================================================
+    // ЧАСТЬ 3: СТРОКА ПОИСКА И ФИЛЬТРЫ НА ДОСКЕ (С ПОДДЕРЖКОЙ КАРТОЧЕК-ПРИЗРАКОВ)
     // =================================================================================
 
    function applySearchFilter(term) {
-    const originalTerm = term.trim();
-    term = term.toLowerCase().trim();
-    localStorage.setItem('addon_board_search', originalTerm);
+        const originalTerm = term.trim();
+        term = term.toLowerCase().trim();
+        localStorage.setItem('addon_board_search', originalTerm);
 
-    const groups = document.querySelectorAll('.rdb-group');
-    const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
+        const groups = document.querySelectorAll('.rdb-group');
+        const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
 
-    groups.forEach(group => {
-        const issues = group.querySelectorAll('.rdb-issue');
-        let visibleCount = 0;
+        // Считываем настройки карточек-призраков и принятых карточек
+        const showGhostCards = localStorage.getItem('addon_show_ghost_cards') !== 'false';
+        const showReceivedCards = localStorage.getItem('addon_show_received_cards') !== 'false';
 
-        issues.forEach(card => {
-            const idText = card.querySelector('.rdb-menu-link')?.textContent.toLowerCase() || '';
-            const subjectText = (card.querySelector('.rdb-property-subject')?.textContent || card.querySelector('.rdb-card-subject')?.textContent || '').toLowerCase();
-            const assigneeText = (card.querySelector('.rdb-property-assignee')?.textContent || '').trim();
-            const trackerText = (card.querySelector('.rdb-property-tracker')?.textContent || '').trim();
-            const statusText = (card.querySelector('.status-border')?.textContent || '').trim();
-            const taskId = card.querySelector('.rdb-menu-link')?.textContent.trim().replace('#', '') || '';
+        groups.forEach(group => {
+            const issues = group.querySelectorAll('.rdb-issue');
+            let visibleCount = 0;
 
-            let priorityText = '';
-            const prioEl = card.querySelector('.rdb-priority');
-            if (prioEl) {
-                for (const cls of prioEl.classList) {
-                    const configItem = PRIORITIES_CONFIG.find(p => p.id === cls);
-                    if (configItem) { priorityText = configItem.label; break; }
+            issues.forEach(card => {
+                const idText = card.querySelector('.rdb-menu-link')?.textContent.toLowerCase() || '';
+                const subjectText = (card.querySelector('.rdb-property-subject')?.textContent || card.querySelector('.rdb-card-subject')?.textContent || '').toLowerCase();
+                const assigneeText = (card.querySelector('.rdb-property-assignee')?.textContent || '').trim();
+                const trackerText = (card.querySelector('.rdb-property-tracker')?.textContent || '').trim();
+                const statusText = (card.querySelector('.status-border')?.textContent || '').trim();
+                const taskId = card.querySelector('.rdb-menu-link')?.textContent.trim().replace('#', '') || '';
+
+                let priorityText = '';
+                const prioEl = card.querySelector('.rdb-priority');
+                if (prioEl) {
+                    for (const cls of prioEl.classList) {
+                        const configItem = PRIORITIES_CONFIG.find(p => p.id === cls);
+                        if (configItem) { priorityText = configItem.label; break; }
+                    }
                 }
-            }
 
-            const projEl = card.querySelector('.rdb-card-content > div:not([class])') || card.querySelector('.rdb-card-content > div:nth-child(2)');
-            const projectText = projEl ? projEl.textContent.trim() : '';
+                const projEl = card.querySelector('.rdb-card-content > div:not([class])') || card.querySelector('.rdb-card-content > div:nth-child(2)');
+                const projectText = projEl ? projEl.textContent.trim() : '';
 
-            let deadlineText = 'Дедлайн не задан';
-            if (card.querySelector('.deadline-expired')) deadlineText = 'Дедлайн просрочен';
-            else if (card.querySelector('.deadline-warning')) deadlineText = 'Дедлайн скоро';
-            else if (card.querySelector('.deadline-normal')) deadlineText = 'Дедлайн не скоро';
+                let deadlineText = 'Дедлайн не задан';
+                if (card.querySelector('.deadline-expired')) deadlineText = 'Дедлайн просрочен';
+                else if (card.querySelector('.deadline-warning')) deadlineText = 'Дедлайн скоро';
+                else if (card.querySelector('.deadline-normal')) deadlineText = 'Дедлайн не скоро';
 
-            let matchesFilters = true;
-            if (activeFilters.users.length > 0 && !activeFilters.users.includes(assigneeText)) matchesFilters = false;
-            if (activeFilters.projects.length > 0 && !activeFilters.projects.includes(projectText)) matchesFilters = false;
-            if (activeFilters.trackers.length > 0 && !activeFilters.trackers.includes(trackerText)) matchesFilters = false;
-            if (activeFilters.statuses.length > 0 && !activeFilters.statuses.includes(statusText)) matchesFilters = false;
-            if (activeFilters.priorities.length > 0 && !activeFilters.priorities.includes(priorityText)) matchesFilters = false;
-            if (activeFilters.deadlines.length > 0 && !activeFilters.deadlines.includes(deadlineText)) matchesFilters = false;
-            if (activeFilters.onlyFavorites && !favs.some(f => f.id === taskId)) matchesFilters = false;
+                // 1. Проверяем все фильтры КРОМЕ ИСПОЛНИТЕЛЯ
+                let matchesOtherFilters = true;
+                if (activeFilters.projects.length > 0 && !activeFilters.projects.includes(projectText)) matchesOtherFilters = false;
+                if (activeFilters.trackers.length > 0 && !activeFilters.trackers.includes(trackerText)) matchesOtherFilters = false;
+                if (activeFilters.statuses.length > 0 && !activeFilters.statuses.includes(statusText)) matchesOtherFilters = false;
+                if (activeFilters.priorities.length > 0 && !activeFilters.priorities.includes(priorityText)) matchesOtherFilters = false;
+                if (activeFilters.deadlines.length > 0 && !activeFilters.deadlines.includes(deadlineText)) matchesOtherFilters = false;
+                if (activeFilters.onlyFavorites && !favs.some(f => f.id === taskId)) matchesOtherFilters = false;
 
-            let matchesSearch = true;
-            if (term) matchesSearch = idText.includes(term) || subjectText.includes(term);
+                // 2. Проверяем строку поиска
+                let matchesSearch = true;
+                if (term) matchesSearch = idText.includes(term) || subjectText.includes(term);
 
-            if (matchesFilters && matchesSearch) {
-                card.style.display = '';
-                visibleCount++;
-            } else {
-                card.style.display = 'none';
-            }
+                // 3. Отдельно проверяем фильтр по Исполнителю
+                let matchesAssignee = true;
+                if (activeFilters.users.length > 0 && !activeFilters.users.includes(assigneeText)) matchesAssignee = false;
+
+                // --- ЛОГИКА ТРАНЗИТНЫХ КАРТОЧЕК ---
+                let isGhost = false;
+                let ghostAssignee = '';
+                let isReceived = false;
+                let originalAssignee = '';
+
+                if (matchesOtherFilters && matchesSearch) {
+                    const fav = favs.find(f => f.id === taskId);
+                    if (fav) {
+                        const savedAssigneeName = fav.savedAssignee || fav.assignee;
+
+                        // 1. ОРАНЖЕВЫЙ ПРИЗРАК (Задача ушла):
+                        if (showGhostCards && !matchesAssignee && savedAssigneeName && activeFilters.users.includes(savedAssigneeName) && savedAssigneeName !== assigneeText) {
+                            isGhost = true;
+                            ghostAssignee = savedAssigneeName;
+                        }
+
+                        // 2. ЗЕЛЕНАЯ СТРЕЛКА (Задача пришла):
+                        if (showReceivedCards && matchesAssignee && activeFilters.users.length > 0 && savedAssigneeName && savedAssigneeName !== assigneeText) {
+                            isReceived = true;
+                            originalAssignee = savedAssigneeName;
+                        }
+                    }
+                }
+
+                // --- ОБНОВЛЕНИЕ UI С КЕШИРОВАНИЕМ СОСТОЯНИЯ ---
+                const uiWrapper = card.querySelector('.custom-ui-wrapper');
+
+                if ((matchesOtherFilters && matchesSearch && matchesAssignee) || isGhost) {
+                    card.style.display = '';
+                    visibleCount++;
+
+                    if (uiWrapper) {
+                        const stateKey = isGhost ? `ghost_${ghostAssignee}` : (isReceived ? `received_${originalAssignee}` : 'none');
+
+                        if (uiWrapper.getAttribute('data-transit-state') !== stateKey) {
+                            uiWrapper.setAttribute('data-transit-state', stateKey);
+
+                            uiWrapper.style.opacity = '1';
+                            uiWrapper.style.backgroundColor = '#fff';
+                            uiWrapper.querySelectorAll('.addon-ghost-icon, .addon-received-icon').forEach(el => el.remove());
+
+                            // Функция позиционирования для стандартного тултипа
+                            const positionIconTooltip = (e) => {
+                                const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                if (!tooltipEl) return;
+                                let left = e.clientX + 10;
+                                let top = e.clientY + 15;
+                                const rect = tooltipEl.getBoundingClientRect();
+                                if (left + rect.width > window.innerWidth) left = e.clientX - rect.width - 10;
+                                if (top + rect.height > window.innerHeight) top = e.clientY - rect.height - 10;
+                                tooltipEl.style.left = left + 'px';
+                                tooltipEl.style.top = top + 'px';
+                            };
+
+                            if (isGhost) {
+                                uiWrapper.style.opacity = '0.6';
+                                uiWrapper.style.backgroundColor = '#f8fafc';
+
+                                const footer = uiWrapper.querySelector('.c-card-footer');
+                                if (footer) {
+                                    const ghostIcon = document.createElement('div');
+                                    ghostIcon.className = 'addon-ghost-icon';
+                                    ghostIcon.style.cssText = 'display: flex; align-items: center; justify-content: center; margin-right: -2px; color: #f59e0b; cursor: help; padding: 2px;';
+                                    ghostIcon.setAttribute('data-tooltip', `Задача была добавлена в избранное, когда была назначена на [${ghostAssignee}], но сейчас назначена на [${assigneeText}]`);
+
+                                    ghostIcon.addEventListener('mouseenter', (e) => {
+                                        const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                        if (tooltipEl) {
+                                            tooltipEl.innerHTML = ghostIcon.getAttribute('data-tooltip');
+                                            tooltipEl.style.display = 'block';
+                                            positionIconTooltip(e);
+                                        }
+                                    });
+
+                                    ghostIcon.addEventListener('mousemove', (e) => {
+                                        const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                        if (tooltipEl && tooltipEl.style.display === 'block') positionIconTooltip(e);
+                                    });
+
+                                    ghostIcon.addEventListener('mouseleave', () => {
+                                        const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                        if (tooltipEl) tooltipEl.style.display = 'none';
+                                    });
+
+                                    ghostIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>`;
+
+                                    const avatar = footer.querySelector('.c-card-avatar');
+                                    if (avatar) footer.insertBefore(ghostIcon, avatar);
+                                    else footer.appendChild(ghostIcon);
+                                }
+                            } else if (isReceived) {
+                                const footer = uiWrapper.querySelector('.c-card-footer');
+                                if (footer) {
+                                    const receivedIcon = document.createElement('div');
+                                    receivedIcon.className = 'addon-received-icon';
+                                    receivedIcon.style.cssText = 'display: flex; align-items: center; justify-content: center; margin-right: -2px; color: #10b981; cursor: help; padding: 2px;';
+                                    receivedIcon.setAttribute('data-tooltip', `Задача перешла к [${assigneeText}], но когда была добавлена в избранное, была назначена на [${originalAssignee}]`);
+
+                                    receivedIcon.addEventListener('mouseenter', (e) => {
+                                        const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                        if (tooltipEl) {
+                                            tooltipEl.innerHTML = receivedIcon.getAttribute('data-tooltip');
+                                            tooltipEl.style.display = 'block';
+                                            positionIconTooltip(e);
+                                        }
+                                    });
+
+                                    receivedIcon.addEventListener('mousemove', (e) => {
+                                        const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                        if (tooltipEl && tooltipEl.style.display === 'block') positionIconTooltip(e);
+                                    });
+
+                                    receivedIcon.addEventListener('mouseleave', () => {
+                                        const tooltipEl = document.getElementById('addon-instant-tooltip');
+                                        if (tooltipEl) tooltipEl.style.display = 'none';
+                                    });
+
+                                    receivedIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>`;
+
+                                    const avatar = footer.querySelector('.c-card-avatar');
+                                    if (avatar) footer.insertBefore(receivedIcon, avatar);
+                                    else footer.appendChild(receivedIcon);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    card.style.display = 'none';
+                    if (uiWrapper) uiWrapper.removeAttribute('data-transit-state');
+                }
+            });
+
+            const hasAnyFilter = term || activeFilters.users.length > 0 || activeFilters.projects.length > 0 || activeFilters.trackers.length > 0 || activeFilters.statuses.length > 0 || activeFilters.priorities.length > 0 || activeFilters.deadlines.length > 0 || activeFilters.onlyFavorites;
+            group.style.display = (visibleCount === 0 && hasAnyFilter) ? 'none' : '';
         });
 
-        const hasAnyFilter = term || activeFilters.users.length > 0 || activeFilters.projects.length > 0 || activeFilters.trackers.length > 0 || activeFilters.statuses.length > 0 || activeFilters.priorities.length > 0 || activeFilters.deadlines.length > 0 || activeFilters.onlyFavorites;
-        group.style.display = (visibleCount === 0 && hasAnyFilter) ? 'none' : '';
-    });
+        if (typeof updateFiltersTriggerBadge === 'function') updateFiltersTriggerBadge();
+    }
 
-    updateFiltersTriggerBadge();
-}
+
+
+
 
 function updateFiltersTriggerBadge() {
     const triggerBtn = document.getElementById('addon-filters-trigger');
@@ -2693,8 +2934,7 @@ function updateFiltersTriggerBadge() {
 
 
 
-    function initFiltersDropdownLogic(parentContainer, triggerBtn) {
-        // Достаем сохраненную ширину или ставим дефолтную
+  function initFiltersDropdownLogic(parentContainer, triggerBtn) {
         const savedWidth = localStorage.getItem('addon_filters_width') || '260px';
 
         const dropdown = document.createElement('div');
@@ -2703,16 +2943,13 @@ function updateFiltersTriggerBadge() {
             position: 'absolute', top: '100%', left: '208px', marginTop: '8px',
             backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px',
             boxShadow: '0 10px 25px rgba(0,0,0,0.1)', padding: '12px',
-            minWidth: '260px',
-            width: savedWidth, // Применяем ширину
+            minWidth: '260px', width: savedWidth,
             zIndex: '1000', display: 'none', flexDirection: 'column', gap: '2px', boxSizing: 'border-box',
-            resize: 'horizontal', // Включаем растягивание по горизонтали
-            overflow: 'hidden'    // Обязательное условие для работы resize
+            resize: 'horizontal', overflow: 'hidden'
         });
 
         parentContainer.appendChild(dropdown);
 
-        // Отслеживаем растягивание окна и сохраняем размер в local storage
         const resizeObserver = new ResizeObserver(entries => {
             for (let entry of entries) {
                 if (dropdown.style.display !== 'none' && dropdown.style.width) {
@@ -2743,6 +2980,41 @@ function updateFiltersTriggerBadge() {
             if (!parentContainer.contains(e.target) && dropdown.style.display === 'flex') dropdown.style.display = 'none';
         });
 
+        // --- ТОЧЕЧНОЕ ОБНОВЛЕНИЕ ТОГГЛОВ ---
+        window.toggleGhostCardsSetting = function(e, element) {
+            e.stopPropagation();
+            const current = localStorage.getItem('addon_show_ghost_cards') !== 'false';
+            const newState = !current;
+            localStorage.setItem('addon_show_ghost_cards', newState);
+
+            const row = element.closest('.addon-filter-link-row');
+            if (row) {
+                const bg = row.querySelector('.tgl-bg');
+                const knob = row.querySelector('.tgl-knob');
+                if (bg) bg.style.backgroundColor = newState ? '#3b82f6' : '#cbd5e1';
+                if (knob) knob.style.transform = newState ? 'translateX(14px)' : 'translateX(0)';
+            }
+
+            applySearchFilter(document.querySelector('.addon-search-input')?.value || '');
+        };
+
+        window.toggleReceivedCardsSetting = function(e, element) {
+            e.stopPropagation();
+            const current = localStorage.getItem('addon_show_received_cards') !== 'false';
+            const newState = !current;
+            localStorage.setItem('addon_show_received_cards', newState);
+
+            const row = element.closest('.addon-filter-link-row');
+            if (row) {
+                const bg = row.querySelector('.tgl-bg');
+                const knob = row.querySelector('.tgl-knob');
+                if (bg) bg.style.backgroundColor = newState ? '#3b82f6' : '#cbd5e1';
+                if (knob) knob.style.transform = newState ? 'translateX(14px)' : 'translateX(0)';
+            }
+
+            applySearchFilter(document.querySelector('.addon-search-input')?.value || '');
+        };
+
         window.toggleDropdownCheckboxFilter = function(type, val) {
             if (type === 'users') {
                 if (activeFilters.users.includes(val)) activeFilters.users = activeFilters.users.filter(x => x !== val);
@@ -2771,6 +3043,49 @@ function updateFiltersTriggerBadge() {
             activeFilters.onlyFavorites = !activeFilters.onlyFavorites;
             applySearchFilter(document.querySelector('.addon-search-input')?.value || '');
             window.renderFiltersDropdownView('main');
+        };
+
+        const renderHelpTooltip = (iconEl, title, color, text1, text2) => {
+            let tooltip = document.getElementById('addon-filters-help-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'addon-filters-help-tooltip';
+                tooltip.style.cssText = `
+                    position: fixed; z-index: 100000; width: 280px; background: #1e293b; color: #f8fafc;
+                    padding: 14px; border-radius: 8px; font-size: 13px; line-height: 1.5; font-family: 'Inter', sans-serif;
+                    box-shadow: 0 10px 25px rgba(0,0,0,0.2); pointer-events: none; display: none;
+                `;
+                document.body.appendChild(tooltip);
+            }
+
+            tooltip.innerHTML = `
+                <div style="font-weight:600; color:#fff; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2-9 5 18 3-9h5"></path></svg>
+                    ${title}
+                </div>
+                <div style="color: #cbd5e1;">${text1}</div>
+                <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #334155; color: #cbd5e1;">${text2}</div>
+            `;
+
+            tooltip.style.display = 'block';
+
+            const rect = iconEl.getBoundingClientRect();
+            let left = rect.right + 12;
+            let top = rect.top - 10;
+
+            const ttRect = tooltip.getBoundingClientRect();
+            if (left + ttRect.width > window.innerWidth) left = rect.left - ttRect.width - 12;
+            if (top + ttRect.height > window.innerHeight) top = window.innerHeight - ttRect.height - 10;
+
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+        };
+
+        const hideHelpTooltip = () => {
+            const tooltip = document.getElementById('addon-filters-help-tooltip');
+            if (tooltip) {
+                tooltip.style.display = 'none';
+            }
         };
 
         window.renderFiltersDropdownView = function(view) {
@@ -2846,10 +3161,47 @@ function updateFiltersTriggerBadge() {
                 if (view === 'priorities') { headerText = 'Сбросить приоритеты'; arrData = boardData.priorities; activeArr = activeFilters.priorities; prefix = '⚡ '; actionType = 'priorities'; }
                 if (view === 'deadlines') { headerText = 'Сбросить дедлайны'; arrData = boardData.deadlines; activeArr = activeFilters.deadlines; prefix = '⏰ '; actionType = 'deadlines'; }
 
-                // Динамический стиль для лейблов: для проектов разрешаем перенос слов
                 const labelStyle = actionType === 'projects'
                     ? 'cursor:pointer; flex: 1; white-space:normal; word-wrap:break-word; margin-right:8px; line-height:1.4;'
                     : 'cursor:pointer; flex: 1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:8px;';
+
+                let optionsHtml = '';
+                if (view === 'users') {
+                    const showGhostCards = localStorage.getItem('addon_show_ghost_cards') !== 'false';
+                    const showReceivedCards = localStorage.getItem('addon_show_received_cards') !== 'false';
+
+                    optionsHtml = `
+                        <div class="addon-filters-header" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">Дополнительные опции</div>
+
+                        <div class="addon-filter-link-row" style="cursor: default; padding-right: 4px; padding-bottom: 2px;">
+                            <div style="display:flex; align-items:center; gap:6px; flex:1;">
+                                <label onclick="window.toggleGhostCardsSetting(event, this)" style="font-weight:500; cursor:pointer; color:#334155; user-select: none;">Показывать переназначенные</label>
+                                <div id="addon-ghost-help-icon" style="cursor:help; color:#94a3b8; display:flex; align-items:center; padding: 2px; transition: color 0.2s;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                </div>
+                            </div>
+                            <div style="position: relative; width: 32px; height: 18px; flex-shrink: 0; cursor: pointer;" onclick="window.toggleGhostCardsSetting(event, this)">
+                                <div class="tgl-bg" style="position: absolute; inset: 0; background-color: ${showGhostCards ? '#3b82f6' : '#cbd5e1'}; transition: 0.2s; border-radius: 18px;">
+                                    <div class="tgl-knob" style="position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: white; transition: 0.2s; border-radius: 50%; transform: ${showGhostCards ? 'translateX(14px)' : 'translateX(0)'};"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="addon-filter-link-row" style="cursor: default; padding-right: 4px;">
+                            <div style="display:flex; align-items:center; gap:6px; flex:1;">
+                                <label onclick="window.toggleReceivedCardsSetting(event, this)" style="font-weight:500; cursor:pointer; color:#334155; user-select: none;">Показывать принятые</label>
+                                <div id="addon-received-help-icon" style="cursor:help; color:#94a3b8; display:flex; align-items:center; padding: 2px; transition: color 0.2s;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                </div>
+                            </div>
+                            <div style="position: relative; width: 32px; height: 18px; flex-shrink: 0; cursor: pointer;" onclick="window.toggleReceivedCardsSetting(event, this)">
+                                <div class="tgl-bg" style="position: absolute; inset: 0; background-color: ${showReceivedCards ? '#3b82f6' : '#cbd5e1'}; transition: 0.2s; border-radius: 18px;">
+                                    <div class="tgl-knob" style="position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: white; transition: 0.2s; border-radius: 50%; transform: ${showReceivedCards ? 'translateX(14px)' : 'translateX(0)'};"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
 
                 dropdown.innerHTML = `
                     <div class="addon-filter-link-row" style="padding-left:4px !important; margin-bottom:4px;" onclick="window.renderFiltersDropdownView('main')">
@@ -2866,10 +3218,50 @@ function updateFiltersTriggerBadge() {
                         ${arrData.length === 0 ? '<div style="font-size:12px; color:#94a3b8; text-align:center; padding:10px;">Нет данных</div>' : ''}
                     </div>
 
+                    ${optionsHtml}
+
                     ${hasAnyFilter ? `<div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #e2e8f0;">${renderTags()}</div>` : ''}
 
                     ${activeArr.length > 0 ? `<div id="addon-filters-btn-reset-cat" style="margin-top:4px; padding-top:8px; border-top:1px solid #e2e8f0; font-size:12px; font-weight:600; color:#ef4444; text-align:center; cursor:pointer; transition: opacity 0.2s;">${headerText}</div>` : ''}
                 `;
+
+                if (view === 'users') {
+                    const helpIconGhost = dropdown.querySelector('#addon-ghost-help-icon');
+                    if (helpIconGhost) {
+                        helpIconGhost.onmouseenter = () => {
+                            helpIconGhost.style.color = '#3b82f6';
+                            renderHelpTooltip(
+                                helpIconGhost,
+                                'Для чего это нужно?',
+                                '#3b82f6',
+                                'Опция помогает не терять избранные задачи, у которых изменился исполнитель, при фильтрации по исполнителю.',
+                                'Если вы сохранили задачу в <b>Избранное</b>, когда она была назначена на одного сотрудника, а после он перевел её на другого - при фильтрации доски по первому сотруднику эта задача не исчезнет.<br><br>Она останется на экране полупрозрачной, а слева от иконки исполнителя появится оранжевая стрелочка. Это позволяет не терять задачи из фокуса - вы сразу увидите, что человек завершил свой этап и передал задачу дальше по процессу.'
+                            );
+                        };
+                        helpIconGhost.onmouseleave = () => {
+                            helpIconGhost.style.color = '#94a3b8';
+                            hideHelpTooltip();
+                        };
+                    }
+
+                    const helpIconReceived = dropdown.querySelector('#addon-received-help-icon');
+                    if (helpIconReceived) {
+                        helpIconReceived.onmouseenter = () => {
+                            helpIconReceived.style.color = '#10b981';
+                            renderHelpTooltip(
+                                helpIconReceived,
+                                'Для чего это нужно?',
+                                '#10b981',
+                                'Опция подсвечивает избранные задачи, которые перешли к выбранному в фильтре исполнителю от другого.',
+                                'Если вы добавили задачу в <b>Избранное</b>, когда она была на одном сотруднике, а затем она была переведена на другого исполнителя, то при фильтрации по второму исполнителю, на карточке задачи появится зеленая стрелочка слева от иконки исполнителя.<br><br>Это помогает быстро отследить избранные задачи, которые были переданы по процессу.'
+                            );
+                        };
+                        helpIconReceived.onmouseleave = () => {
+                            helpIconReceived.style.color = '#94a3b8';
+                            hideHelpTooltip();
+                        };
+                    }
+                }
 
                 const resetCatBtn = dropdown.querySelector('#addon-filters-btn-reset-cat');
                 if (resetCatBtn) {
@@ -2882,8 +3274,6 @@ function updateFiltersTriggerBadge() {
             }
         };
     }
-
-
 
 
 
@@ -3977,15 +4367,42 @@ function openFiltersModal() {
                 favs = getFavs();
                 const existingIndex = favs.findIndex(f => f.id === ctx.taskId);
                 if (existingIndex === -1) {
-                    favs.push({ id: ctx.taskId, project: projectName, assignee: ctx.assignee, title: ctx.title, url: ctx.taskUrl, timestamp: new Date().getTime() });
+                    favs.push({
+                        id: ctx.taskId, project: projectName, assignee: ctx.assignee,
+                        savedAssignee: ctx.assignee, title: ctx.title, url: ctx.taskUrl, timestamp: new Date().getTime()
+                    });
                 } else {
                     favs.splice(existingIndex, 1);
                 }
                 setFavs(favs);
-                if (updateStarsCallback) updateStarsCallback();
+                if (window.addonRenderBoardStars) window.addonRenderBoardStars();
                 contextMenu.style.display = 'none';
             });
         };
+
+        const moduleNote = (ctx) => {
+            const noteText = window.addonGetTaskNote ? window.addonGetTaskNote(ctx.taskId) : '';
+            const icon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+
+            return createMenuItem(icon, noteText ? 'Изменить заметку' : 'Добавить заметку', '#334155', (itemNode) => {
+                // Фиксируем координаты пункта меню ДО его скрытия
+                const rect = itemNode.getBoundingClientRect();
+                const clickAnchor = {
+                    isMenuClick: true,
+                    x: rect.left + 30, // Позиция примерно под кликом мыши
+                    y: rect.top + 15
+                };
+
+                contextMenu.style.display = 'none';
+
+                if (window.addonShowNotePopup) {
+                    setTimeout(() => {
+                        window.addonShowNotePopup(ctx.taskId, clickAnchor, true);
+                    }, 10);
+                }
+            });
+        };
+
 
         const moduleCreateGitIssue = (ctx) => {
             const projectSpan = document.querySelector('.current-project');
@@ -4052,8 +4469,9 @@ function openFiltersModal() {
 
             contextMenu.innerHTML = '';
 
-            // 1. Избранное
+            // 1. Избранное и Заметка
             contextMenu.appendChild(moduleFavorite(ctx));
+            contextMenu.appendChild(moduleNote(ctx));
             contextMenu.appendChild(createDivider());
 
             // 2. В новой вкладке и Скопировать ссылку
@@ -6396,6 +6814,780 @@ function openFiltersModal() {
 
 
 
+// =================================================================================
+    // СИСТЕМА ЛОКАЛЬНЫХ ЗАМЕТОК К ЗАДАЧАМ С АВТОСОХРАНЕНИЕМ И ТЕГАМИ
+    // =================================================================================
+
+    window.addonGetTaskNote = (taskId) => {
+        let notes = JSON.parse(localStorage.getItem('addon_task_notes') || '{}');
+        if (typeof notes[taskId] === 'undefined') {
+            const favs = JSON.parse(localStorage.getItem('addon_favorite_tasks') || '[]');
+            const fav = favs.find(f => f.id === taskId);
+            if (fav && fav.note) {
+                notes[taskId] = fav.note;
+                localStorage.setItem('addon_task_notes', JSON.stringify(notes));
+            }
+        }
+        return notes[taskId] || '';
+    };
+
+    window.addonSetTaskNote = (taskId, text) => {
+        let notes = JSON.parse(localStorage.getItem('addon_task_notes') || '{}');
+        if (text.trim() === '') {
+            delete notes[taskId];
+        } else {
+            notes[taskId] = text.trim();
+        }
+        localStorage.setItem('addon_task_notes', JSON.stringify(notes));
+    };
+
+    window.addonGetNoteTags = () => {
+        let tags = localStorage.getItem('addon_note_tags');
+        if (!tags) {
+            tags = ['#план', '#в_фокусе', '#блокер', '#проконтролировать'];
+            localStorage.setItem('addon_note_tags', JSON.stringify(tags));
+            return tags;
+        }
+        return JSON.parse(tags);
+    };
+
+    window.addonAddNoteTag = (tag) => {
+        let tags = window.addonGetNoteTags();
+        tag = tag.trim().replace(/\s+/g, '_');
+        if (!tag.startsWith('#')) tag = '#' + tag;
+        if (!tags.includes(tag)) {
+            tags.push(tag);
+            localStorage.setItem('addon_note_tags', JSON.stringify(tags));
+        }
+    };
+
+    window.addonRemoveNoteTag = (tag) => {
+        let tags = window.addonGetNoteTags();
+        tags = tags.filter(t => t !== tag);
+        localStorage.setItem('addon_note_tags', JSON.stringify(tags));
+    };
+
+    // --- ПАЛИТРА 7 ЦВЕТОВ ---
+    const DEFAULT_PALETTE = {
+        c1: '#ef4444', // Красный (Приоритет/Блокер)
+        c2: '#f97316', // Оранжевый (Средний)
+        c3: '#10b981', // Зеленый (Успех/Фокус)
+        c4: '#3b82f6', // Синий (Базовый дефолт)
+        c5: '#8b5cf6', // Фиолетовый
+        c6: '#ec4899', // Розовый
+        c7: '#475569'  // Грифельно-серый (Обычный шрифт)
+    };
+
+    window.addonGetCustomPalette = () => {
+        let p = localStorage.getItem('addon_note_palette');
+        if (!p) {
+            localStorage.setItem('addon_note_palette', JSON.stringify(DEFAULT_PALETTE));
+            return DEFAULT_PALETTE;
+        }
+        return JSON.parse(p);
+    };
+
+    window.addonSetCustomPaletteColor = (key, hex) => {
+        let p = window.addonGetCustomPalette();
+        p[key] = hex;
+        localStorage.setItem('addon_note_palette', JSON.stringify(p));
+    };
+
+    window.addonGetTagColors = () => {
+        let colors = localStorage.getItem('addon_note_tag_colors');
+        if (!colors) {
+            colors = { '#план': 'c4', '#в_фокусе': 'c3', '#блокер': 'c1', '#проконтролировать': 'c5' };
+            localStorage.setItem('addon_note_tag_colors', JSON.stringify(colors));
+            return colors;
+        }
+        return JSON.parse(colors);
+    };
+
+    window.addonSetTagColor = (tag, colorKey) => {
+        let colors = window.addonGetTagColors();
+        colors[tag] = colorKey;
+        localStorage.setItem('addon_note_tag_colors', JSON.stringify(colors));
+    };
+
+    function initNotePopupSystem() {
+        if (document.getElementById('addon-note-popup-container')) return;
+
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes addonNoteZoomIn {
+                0% { opacity: 0; transform: scale(0.85); }
+                100% { opacity: 1; transform: scale(1); }
+            }
+            #addon-note-popup-container {
+                position: absolute; z-index: 100010; background: #fff; border: 1px solid #cbd5e1;
+                border-radius: 12px; box-shadow: 0 15px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05);
+                padding: 16px; width: 300px; display: none; flex-direction: column; gap: 10px; font-family: 'Inter', sans-serif;
+            }
+            .addon-note-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; }
+            .addon-note-title { font-size: 12px; font-weight: 600; color: #475569; display: flex; align-items: center; gap: 6px; }
+
+            /* --- ЕДИНЫЙ БЛОК ДЛЯ МНОГОСТРОЧНЫХ ТЕГОВ --- */
+            .addon-note-hashtag {
+                display: inline;
+                background: #f8fafc; color: var(--hash-text, #3b82f6);
+                border: 1px solid #e2e8f0;
+                padding: 3px 6px; border-radius: 6px; font-weight: 600; font-size: 11px;
+                transition: padding 0.15s, margin 0.15s, background 0.15s, border-color 0.15s;
+                cursor: default;
+                margin: 0 20px 0 2px; /* Резерв только в конце тега (благодаря slice) */
+                word-break: break-word; line-height: 2.2;
+                /* Убрано свойство clone, теперь это единая плашка обрамляющая текст */
+            }
+            .addon-note-hashtag:hover {
+                background: #f1f5f9; border-color: #cbd5e1;
+                padding-right: 22px;
+                margin-right: 4px; /* Нулевое смещение, текст стоит монолитно */
+            }
+            .addon-note-hashtag .remove-text-tag {
+                display: inline-block;
+                width: 16px; text-align: center;
+                margin-right: -16px;
+                cursor: pointer; color: inherit; opacity: 0; font-size: 14px;
+                line-height: 11px; font-weight: bold; vertical-align: middle;
+                transition: opacity 0.15s;
+                transform: translate(5px, -1px);
+            }
+            .addon-note-hashtag:hover .remove-text-tag { opacity: 0.6; }
+            .addon-note-hashtag:hover .remove-text-tag:hover { opacity: 1; }
+
+            .addon-note-view { font-size: 13px; color: #334155; cursor: text; min-height: 30px; white-space: pre-wrap; word-wrap: break-word; padding: 8px; border-radius: 6px; transition: background 0.2s; line-height: 1.5; background: #f8fafc; border: 1px solid transparent;}
+            .addon-note-view:hover { background: #f1f5f9; border-color: #e2e8f0; }
+
+            .addon-note-edit, .addon-note-settings { display: none; flex-direction: column; gap: 8px; }
+            .addon-note-textarea { width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif; font-size: 13px; padding: 10px; border: 1px solid #94a3b8; border-radius: 8px; resize: vertical; min-height: 80px; outline: none; line-height: 1.5; transition: border-color 0.2s, box-shadow 0.2s;}
+            .addon-note-textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+
+            .addon-tags-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; position: relative;}
+
+            .addon-tag-chip {
+                background: #f8fafc; color: #475569;
+                font-size: 11px; font-weight: 600; padding: 4px 8px;
+                border-radius: 6px; cursor: grab; display: flex; align-items: center;
+                transition: transform 0.25s cubic-bezier(0.2, 1, 0.2, 1), background 0.2s, border-color 0.2s;
+                border: 1px solid #e2e8f0; user-select: none;
+                max-width: 100%; box-sizing: border-box;
+            }
+            .addon-tag-chip:active { cursor: grabbing; }
+            .addon-tag-chip:hover:not(.dragging) { background: #e2e8f0; border-color: #cbd5e1; }
+
+            .tag-text-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+
+            .addon-tag-chip.dragging {
+                background: #f1f5f9 !important; border: 1px dashed #94a3b8 !important; color: transparent !important;
+                box-shadow: inset 0 0 5px rgba(0,0,0,0.05); opacity: 0.6;
+            }
+            .addon-tag-chip.dragging .tag-color-dot { background-color: transparent; }
+            .addon-tag-chip.dragging .del-tag { opacity: 0 !important; }
+
+            .tag-color-dot {
+                width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; cursor: pointer;
+                background-color: var(--dot-color, #3b82f6); flex-shrink: 0; transition: transform 0.2s, background-color 0.2s;
+            }
+            .tag-color-dot:hover { transform: scale(1.3); }
+
+            .addon-tag-chip .del-tag { opacity: 0; cursor: pointer; color: #ef4444; font-size: 14px; line-height: 1; transition: opacity 0.2s; margin-left: 6px; font-weight: bold; flex-shrink: 0;}
+            .addon-tag-chip:hover:not(.dragging) .del-tag { opacity: 0.8; }
+            .addon-tag-chip:hover:not(.dragging) .del-tag:hover { opacity: 1; }
+
+            .addon-tag-add { background: #fff; border: 1px dashed #cbd5e1; color: #64748b; cursor: pointer; }
+            .addon-tag-add:hover { border-color: #94a3b8; color: #334155; background: #f8fafc; }
+            .addon-tag-input { font-size: 11px; padding: 3px 8px; border: 1px solid #3b82f6; border-radius: 6px; outline: none; width: 80px; display: none; font-family: 'Inter', sans-serif; font-weight: 500; color: #0f172a;}
+
+            /* Сетка выбора цвета (Быстрое меню) */
+            .addon-color-picker-popup {
+                position: absolute; z-index: 100020; background: #fff; border: 1px solid #cbd5e1;
+                border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 8px;
+                display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+                animation: addonNoteZoomIn 0.15s forwards;
+            }
+            .addon-color-circle {
+                width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(0,0,0,0.1);
+                transition: transform 0.1s, box-shadow 0.1s; display: flex; align-items: center; justify-content: center;
+            }
+            .addon-color-circle:hover { transform: scale(1.15); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+            /* Стили окна глобальных настроек палитры */
+            .addon-settings-grid {
+                display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; margin-top: 4px; padding: 4px 10px;
+            }
+            .addon-settings-circle {
+                width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(0,0,0,0.1);
+                margin: 0 auto; transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .addon-settings-circle.active {
+                transform: scale(1.15); box-shadow: 0 0 0 2px #fff, 0 0 0 3px #3b82f6;
+            }
+            .addon-color-input-wrapper {
+                display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #f8fafc; padding: 12px 14px; border-radius: 8px; border: 1px solid #e2e8f0;
+            }
+
+            .addon-native-color-input {
+                -webkit-appearance: none; -moz-appearance: none; appearance: none;
+                width: 36px; height: 36px; border: none; padding: 0; cursor: pointer; background: transparent; border-radius: 8px; outline: none;
+            }
+            .addon-native-color-input::-webkit-color-swatch-wrapper { padding: 0; }
+            .addon-native-color-input::-webkit-color-swatch { border: 1px solid rgba(0,0,0,0.15); border-radius: 8px; }
+            .addon-native-color-input::-moz-color-swatch { border: 1px solid rgba(0,0,0,0.15); border-radius: 8px; }
+
+            .addon-color-hex-input {
+                font-family: monospace; font-size: 13px; color: #334155; font-weight: 600; text-transform: uppercase;
+                background: #fff; padding: 6px 8px; border-radius: 6px; border: 1px solid #cbd5e1; width: 75px;
+                outline: none; transition: border-color 0.2s; text-align: center;
+            }
+            .addon-color-hex-input:focus { border-color: #3b82f6; }
+        `;
+        document.head.appendChild(style);
+
+        const popup = document.createElement('div');
+        popup.id = 'addon-note-popup-container';
+        popup.dataset.mode = 'normal';
+        popup.innerHTML = `
+            <div id="addon-note-header-normal" class="addon-note-header">
+                <span class="addon-note-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    ЗАМЕТКА
+                </span>
+                <svg id="addon-note-delete" style="cursor: pointer; color: #ef4444; transition: all 0.2s;" title="Удалить заметку" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </div>
+
+            <div id="addon-note-header-settings" class="addon-note-header" style="display:none; justify-content:flex-start; gap: 8px;">
+                <span id="addon-btn-settings-back" style="font-size:12px; font-weight:600; color:#3b82f6; cursor:pointer; display:flex; align-items:center; gap:2px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg> Назад
+                </span>
+                <span class="addon-note-title" style="margin-left:auto;">НАСТРОЙКИ ПАЛИТРЫ</span>
+            </div>
+
+            <div id="addon-note-view-mode" class="addon-note-view" title="Кликните, чтобы изменить"></div>
+
+            <div id="addon-note-edit-mode" class="addon-note-edit">
+                <textarea id="addon-note-textarea" class="addon-note-textarea" placeholder="Введите текст..."></textarea>
+                <div id="addon-tags-container" class="addon-tags-bar"></div>
+            </div>
+
+            <div id="addon-note-settings-mode" class="addon-note-settings">
+                <div id="addon-settings-palette-container"></div>
+            </div>
+        `;
+        document.body.appendChild(popup);
+
+        let currentTaskId = null;
+        let hideTimer = null;
+        let selectedSettingsColorKey = 'c1';
+
+        popup.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+        popup.addEventListener('mouseleave', () => {
+            const editMode = popup.querySelector('#addon-note-edit-mode');
+            const settingsMode = popup.querySelector('#addon-note-settings-mode');
+            const colorPicker = document.getElementById('addon-tag-color-picker');
+
+            if (editMode.style.display !== 'flex' && settingsMode.style.display !== 'flex' && (!colorPicker || colorPicker.style.display === 'none')) {
+                hideTimer = setTimeout(() => popup.style.display = 'none', 150);
+            }
+        });
+
+        const saveNote = (keepOpen = false) => {
+            if (!currentTaskId) return;
+            const textarea = popup.querySelector('#addon-note-textarea');
+            const newText = textarea.value;
+            const oldText = window.addonGetTaskNote(currentTaskId);
+
+            if (newText !== oldText) {
+                window.addonSetTaskNote(currentTaskId, newText);
+                if (window.addonRenderBoardStars) window.addonRenderBoardStars();
+                if (window.addonUpdateModalFavWidgets) window.addonUpdateModalFavWidgets(currentTaskId);
+            }
+            if (!keepOpen) popup.style.display = 'none';
+        };
+
+        document.addEventListener('mousedown', (e) => {
+            if (popup.style.display === 'flex' && !popup.contains(e.target)) {
+                if (e.target.closest('#addon-tag-color-picker') || e.target.closest('input[type="color"]')) return;
+                if (e.target.closest('.addon-fav-note-indicator') || e.target.closest('#addon-modal-note-btn')) return;
+
+                if (popup.dataset.mode === 'settings') switchMode('edit');
+                saveNote();
+            }
+        });
+
+        const switchMode = (mode) => {
+            popup.dataset.mode = mode;
+            const hNormal = popup.querySelector('#addon-note-header-normal');
+            const hSettings = popup.querySelector('#addon-note-header-settings');
+            const viewM = popup.querySelector('#addon-note-view-mode');
+            const editM = popup.querySelector('#addon-note-edit-mode');
+            const setM = popup.querySelector('#addon-note-settings-mode');
+
+            hNormal.style.display = mode === 'settings' ? 'none' : 'flex';
+            hSettings.style.display = mode === 'settings' ? 'flex' : 'none';
+            viewM.style.display = mode === 'view' ? 'block' : 'none';
+            editM.style.display = mode === 'edit' ? 'flex' : 'none';
+            setM.style.display = mode === 'settings' ? 'flex' : 'none';
+
+            if (mode === 'edit') {
+                const ta = popup.querySelector('#addon-note-textarea');
+                setTimeout(() => { ta.focus(); ta.selectionStart = ta.value.length; }, 10);
+            } else if (mode === 'settings') {
+                renderSettingsPalette();
+            }
+        };
+
+        popup.querySelector('#addon-btn-settings-back').onclick = () => switchMode('edit');
+
+        document.addEventListener('keydown', (e) => {
+            if (popup.style.display === 'flex' && popup.dataset.mode === 'settings') {
+                if (e.key === 'Escape' || e.key === 'Enter') {
+                    e.preventDefault();
+                    switchMode('edit');
+                }
+            }
+        });
+
+        const renderSettingsPalette = () => {
+            const container = popup.querySelector('#addon-settings-palette-container');
+            const pal = window.addonGetCustomPalette();
+
+            let gridHtml = '<div class="addon-settings-grid">';
+            ['c1','c2','c3','c4','c5','c6','c7'].forEach(key => {
+                const isActive = key === selectedSettingsColorKey ? 'active' : '';
+                gridHtml += `<div class="addon-settings-circle ${isActive}" data-key="${key}" style="background-color: ${pal[key]}"></div>`;
+            });
+            gridHtml += '</div>';
+
+            const currentColor = pal[selectedSettingsColorKey];
+            let editorHtml = `
+                <div class="addon-color-input-wrapper">
+                    <input type="color" class="addon-native-color-input" id="addon-native-color" value="${currentColor}" title="Открыть палитру ОС">
+                    <input type="text" class="addon-color-hex-input" id="addon-hex-display" value="${currentColor}" maxlength="7" title="Можно вставить HEX">
+                </div>
+                <div id="addon-btn-reset-palette" style="margin-top: 14px; font-size: 11px; color: #ef4444; text-align: center; cursor: pointer; font-weight: 600; text-decoration: underline; transition: opacity 0.2s;">
+                    Сбросить к цветам по умолчанию
+                </div>
+            `;
+
+            container.innerHTML = gridHtml + editorHtml;
+
+            container.querySelectorAll('.addon-settings-circle').forEach(circle => {
+                circle.onclick = (e) => {
+                    selectedSettingsColorKey = e.target.dataset.key;
+                    renderSettingsPalette();
+                };
+            });
+
+            const colorInput = container.querySelector('#addon-native-color');
+            const hexInput = container.querySelector('#addon-hex-display');
+
+            const updateColor = (newColor) => {
+                window.addonSetCustomPaletteColor(selectedSettingsColorKey, newColor);
+                container.querySelector(`.addon-settings-circle[data-key="${selectedSettingsColorKey}"]`).style.backgroundColor = newColor;
+                renderTags();
+                updateViewModeContent();
+            };
+
+            // ЛЕГКОЕ ОБНОВЛЕНИЕ: Только визуал, без пересохранений (убирает тормоза пипетки)
+            colorInput.addEventListener('input', (e) => {
+                hexInput.value = e.target.value;
+                container.querySelector(`.addon-settings-circle[data-key="${selectedSettingsColorKey}"]`).style.backgroundColor = e.target.value;
+            });
+
+            // ТЯЖЕЛОЕ ОБНОВЛЕНИЕ: Сохранение и перерисовка DOM только когда юзер закончил выбирать цвет
+            colorInput.addEventListener('change', (e) => {
+                updateColor(e.target.value);
+            });
+
+            hexInput.addEventListener('input', (e) => {
+                let val = e.target.value.trim();
+                if (/^#[0-9A-F]{6}$/i.test(val) || /^#[0-9A-F]{3}$/i.test(val)) {
+                    colorInput.value = val;
+                    updateColor(val);
+                }
+            });
+
+            const resetBtn = container.querySelector('#addon-btn-reset-palette');
+            resetBtn.onmouseenter = () => resetBtn.style.opacity = '0.7';
+            resetBtn.onmouseleave = () => resetBtn.style.opacity = '1';
+            resetBtn.onclick = () => {
+                if (confirm('Сбросить все цвета к стандартным значениям? Это действие нельзя отменить.')) {
+                    localStorage.removeItem('addon_note_palette');
+                    selectedSettingsColorKey = 'c1';
+                    renderTags();
+                    updateViewModeContent();
+                    renderSettingsPalette();
+                }
+            };
+        };
+
+        const updateViewModeContent = () => {
+            const viewMode = popup.querySelector('#addon-note-view-mode');
+            const ta = popup.querySelector('#addon-note-textarea');
+            const escapedText = ta.value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+            const activeTagColors = window.addonGetTagColors();
+            const palette = window.addonGetCustomPalette();
+
+            viewMode.innerHTML = escapedText ? escapedText.replace(/(#\S+)/g, (match) => {
+                const colorKey = activeTagColors[match] || 'c4';
+                const hex = palette[colorKey] || palette.c4;
+                const displayMatch = match.replace(/_/g, '_&#8203;');
+                return `<span class="addon-note-hashtag" data-tag="${match}" style="--hash-text:${hex};">${displayMatch}<span class="remove-text-tag" title="Удалить из текста">×</span></span>`;
+            }) : '';
+        };
+
+        const renderTags = () => {
+            const container = popup.querySelector('#addon-tags-container');
+            if (!container) return;
+            const tags = window.addonGetNoteTags();
+            const tagColors = window.addonGetTagColors();
+            const palette = window.addonGetCustomPalette();
+            container.innerHTML = '';
+
+            if (!container.dataset.dndInit) {
+                container.dataset.dndInit = 'true';
+                container._dndLastSwapTarget = null;
+                container._dndCooldown = false;
+
+                container.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    if (container._dndCooldown) return;
+                    const draggingEl = container.querySelector('.dragging');
+                    if (!draggingEl) return;
+                    const target = e.target.closest('.addon-tag-chip:not(.addon-tag-add):not(.dragging)');
+
+                    if (target) {
+                        const dragBox = draggingEl.getBoundingClientRect();
+                        const targetBox = target.getBoundingClientRect();
+
+                        const isFollowing = draggingEl.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING;
+                        const isSameLine = Math.abs(dragBox.top - targetBox.top) < (dragBox.height / 2);
+                        let shouldSwap = false;
+
+                        if (isSameLine) {
+                            let penetration = isFollowing ? (e.clientX - targetBox.left) / targetBox.width : (targetBox.right - e.clientX) / targetBox.width;
+                            let currentThreshold = 0.3;
+                            if (container._dndLastSwapTarget === target) {
+                                currentThreshold = 0.7;
+                                if (penetration < 0.1) { container._dndLastSwapTarget = null; currentThreshold = 0.3; }
+                            } else if (container._dndLastSwapTarget && container._dndLastSwapTarget !== target) {
+                                container._dndLastSwapTarget = null;
+                            }
+                            shouldSwap = penetration > currentThreshold;
+                        } else {
+                            let vertPenetration = isFollowing ? (e.clientY - targetBox.top) / targetBox.height : (targetBox.bottom - e.clientY) / targetBox.height;
+                            let currentThreshold = 0.3;
+                            if (container._dndLastSwapTarget === target) {
+                                currentThreshold = 0.7;
+                                if (vertPenetration < 0.1) { container._dndLastSwapTarget = null; currentThreshold = 0.3; }
+                            } else if (container._dndLastSwapTarget && container._dndLastSwapTarget !== target) {
+                                container._dndLastSwapTarget = null;
+                            }
+                            shouldSwap = vertPenetration > currentThreshold;
+                        }
+
+                        if (shouldSwap) {
+                            container._dndLastSwapTarget = target;
+                            container._dndCooldown = true;
+                            setTimeout(() => { container._dndCooldown = false; }, 120);
+
+                            const next = isFollowing ? target.nextSibling : target;
+                            const addBtn = container.querySelector('.addon-tag-add');
+                            const targetNode = (next === addBtn || next === container.querySelector('.addon-tag-input')) ? addBtn : next;
+
+                            if (targetNode !== draggingEl && targetNode !== draggingEl.nextSibling) {
+                                const elements = [...container.querySelectorAll('.addon-tag-chip')];
+                                const firstBoxes = elements.map(el => el.getBoundingClientRect());
+
+                                container.insertBefore(draggingEl, targetNode);
+
+                                const lastBoxes = elements.map(el => el.getBoundingClientRect());
+                                elements.forEach((el, i) => {
+                                    if (el === draggingEl) return;
+                                    const dx = firstBoxes[i].left - lastBoxes[i].left;
+                                    const dy = firstBoxes[i].top - lastBoxes[i].top;
+
+                                    if (dx !== 0 || dy !== 0) {
+                                        el.style.transform = `translate(${dx}px, ${dy}px)`;
+                                        el.style.transition = 'none';
+                                        requestAnimationFrame(() => {
+                                            el.style.transform = '';
+                                            el.style.transition = 'transform 0.25s cubic-bezier(0.2, 1, 0.2, 1)';
+                                        });
+                                    }
+                                });
+                            }
+                        }
+                    }
+                });
+            }
+
+            tags.forEach(tag => {
+                const colorKey = tagColors[tag] || 'c4';
+                const hexColor = palette[colorKey] || palette.c4;
+
+                const chip = document.createElement('div');
+                chip.className = 'addon-tag-chip';
+                chip.draggable = true;
+                chip.setAttribute('data-tag-name', tag);
+                chip.style.setProperty('--dot-color', hexColor);
+
+                chip.innerHTML = `
+                    <div class="tag-color-dot" title="Изменить цвет"></div>
+                    <span class="tag-text-label" title="${tag}">${tag}</span>
+                    <span class="del-tag" title="Удалить тег">×</span>
+                `;
+
+                let isDraggingFlag = false;
+
+                chip.querySelector('.tag-color-dot').onclick = (e) => {
+                    e.stopPropagation();
+
+                    let picker = document.getElementById('addon-tag-color-picker');
+                    if (!picker) {
+                        picker = document.createElement('div');
+                        picker.id = 'addon-tag-color-picker';
+                        picker.className = 'addon-color-picker-popup';
+                        document.body.appendChild(picker);
+                    }
+
+                    picker.innerHTML = '';
+                    const currentPalette = window.addonGetCustomPalette();
+
+                    Object.keys(currentPalette).forEach(key => {
+                        const circle = document.createElement('div');
+                        circle.className = 'addon-color-circle';
+                        circle.style.backgroundColor = currentPalette[key];
+                        circle.onclick = (ce) => {
+                            ce.stopPropagation();
+                            window.addonSetTagColor(tag, key);
+                            chip.style.setProperty('--dot-color', currentPalette[key]);
+                            picker.style.display = 'none';
+                            updateViewModeContent();
+                        };
+                        picker.appendChild(circle);
+                    });
+
+                    const gear = document.createElement('div');
+                    gear.className = 'addon-color-circle';
+                    gear.style.background = '#f1f5f9';
+                    gear.style.border = '1px solid #cbd5e1';
+                    gear.title = 'Настроить цвета';
+                    gear.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+                    gear.onclick = (ce) => {
+                        ce.stopPropagation();
+                        picker.style.display = 'none';
+                        switchMode('settings');
+                    };
+                    picker.appendChild(gear);
+
+                    const rect = e.target.getBoundingClientRect();
+                    picker.style.left = rect.left + window.scrollX - 4 + 'px';
+                    picker.style.top = rect.bottom + window.scrollY + 10 + 'px';
+                    picker.style.display = 'grid';
+
+                    const closePicker = (ce) => {
+                        if (!picker.contains(ce.target) && ce.target !== e.target) {
+                            picker.style.display = 'none';
+                            document.removeEventListener('mousedown', closePicker);
+                        }
+                    };
+                    setTimeout(() => document.addEventListener('mousedown', closePicker), 10);
+                };
+
+                chip.addEventListener('dragstart', (e) => {
+                    isDraggingFlag = true;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', tag);
+                    setTimeout(() => chip.classList.add('dragging'), 0);
+                });
+
+                chip.addEventListener('dragend', () => {
+                    chip.classList.remove('dragging');
+                    setTimeout(() => isDraggingFlag = false, 50);
+
+                    const newOrder = [...container.querySelectorAll('.addon-tag-chip:not(.addon-tag-add)')]
+                        .map(el => el.getAttribute('data-tag-name'))
+                        .filter(Boolean);
+                    localStorage.setItem('addon_note_tags', JSON.stringify(newOrder));
+                });
+
+                chip.onclick = (e) => {
+                    e.stopPropagation();
+                    if (isDraggingFlag) return;
+                    insertTagToTextarea(tag);
+                };
+
+                chip.querySelector('.del-tag').onclick = (e) => {
+                    e.stopPropagation();
+                    if (isDraggingFlag) return;
+                    window.addonRemoveNoteTag(tag);
+                    renderTags();
+                };
+
+                container.appendChild(chip);
+            });
+
+            const addBtn = document.createElement('div');
+            addBtn.className = 'addon-tag-chip addon-tag-add';
+            addBtn.innerHTML = `+ новый`;
+
+            const input = document.createElement('input');
+            input.className = 'addon-tag-input';
+            input.type = 'text';
+            input.placeholder = 'имя...';
+
+            input.addEventListener('input', (e) => {
+                if (e.target.value.includes(' ')) {
+                    e.target.value = e.target.value.replace(/\s+/g, '_');
+                }
+            });
+
+            addBtn.onclick = () => { addBtn.style.display = 'none'; input.style.display = 'block'; input.focus(); };
+
+            const finalizeInput = () => {
+                if (input.value.trim()) window.addonAddNoteTag(input.value.trim());
+                renderTags();
+            };
+
+            input.onblur = finalizeInput;
+            input.onkeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                else if (e.key === 'Escape') { input.value = ''; input.blur(); }
+            };
+
+            container.appendChild(addBtn);
+            container.appendChild(input);
+        };
+
+        const insertTagToTextarea = (tagText) => {
+            const ta = popup.querySelector('#addon-note-textarea');
+            let val = ta.value.replace(/^\s+/, '');
+            if (val.includes(tagText)) return;
+
+            const leadingMatch = val.match(/^((?:#\S+\s*)+)/);
+            if (leadingMatch) {
+                let tagsPart = leadingMatch[1].replace(/\s+$/, '');
+                let restPart = val.substring(leadingMatch[0].length).replace(/^\s+/, '');
+                ta.value = tagsPart + '\n' + tagText + (restPart ? '\n\n' + restPart : '');
+            } else {
+                ta.value = tagText + (val ? '\n\n' + val : '');
+            }
+            ta.focus();
+            ta.selectionStart = ta.value.length;
+        };
+
+        window.addonShowNotePopup = function(taskId, targetInfo, forceEdit = false) {
+            clearTimeout(hideTimer);
+
+            if (currentTaskId && currentTaskId !== taskId && popup.style.display === 'flex') {
+                saveNote(true);
+            }
+
+            currentTaskId = taskId;
+            const text = window.addonGetTaskNote(taskId);
+            const textarea = popup.querySelector('#addon-note-textarea');
+
+            textarea.value = text;
+            renderTags();
+            updateViewModeContent();
+
+            switchMode(forceEdit || !text ? 'edit' : 'view');
+
+            popup.style.visibility = 'hidden';
+            popup.style.display = 'flex';
+
+            const popupHeight = popup.offsetHeight;
+            const popupWidth = popup.offsetWidth;
+
+            let leftPos, topPos;
+
+            if (targetInfo && targetInfo.isMenuClick) {
+                leftPos = targetInfo.x;
+                topPos = targetInfo.y;
+                if (leftPos + popupWidth > window.innerWidth - 10) leftPos = targetInfo.x - popupWidth;
+                if (topPos + popupHeight > window.innerHeight - 10) topPos = targetInfo.y - popupHeight;
+            }
+            else if (targetInfo && targetInfo.getBoundingClientRect) {
+                const rect = targetInfo.getBoundingClientRect();
+                const offset = 8;
+                leftPos = rect.right + offset;
+                topPos = rect.top;
+                if (leftPos + popupWidth > window.innerWidth - 10) leftPos = rect.left - popupWidth - offset;
+                if (topPos + popupHeight > window.innerHeight - 10) topPos = Math.max(10, rect.bottom - popupHeight);
+            } else {
+                leftPos = (window.innerWidth - popupWidth) / 2;
+                topPos = (window.innerHeight - popupHeight) / 2;
+            }
+
+            if (leftPos < 10) leftPos = 10;
+            if (topPos < 10) topPos = 10;
+
+            popup.style.left = leftPos + window.scrollX + 'px';
+            popup.style.top = topPos + window.scrollY + 'px';
+            popup.style.visibility = 'visible';
+
+            popup.style.animation = 'none';
+            void popup.offsetWidth;
+            popup.style.animation = 'addonNoteZoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards';
+        };
+
+        popup.querySelector('#addon-note-view-mode').onclick = (e) => {
+            if (e.target.closest('.remove-text-tag')) {
+                e.stopPropagation();
+
+                const tagSpan = e.target.closest('.addon-note-hashtag');
+                const tagText = tagSpan.getAttribute('data-tag');
+                const ta = popup.querySelector('#addon-note-textarea');
+
+                const escapedTag = tagText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`(^|\\s)${escapedTag}(?=\\s|$)`);
+                let newText = ta.value.replace(regex, '');
+
+                newText = newText.replace(/ {2,}/g, ' ').trim();
+                ta.value = newText;
+
+                saveNote(true);
+                updateViewModeContent();
+                return;
+            }
+
+            switchMode('edit');
+        };
+
+        const delBtn = popup.querySelector('#addon-note-delete');
+        delBtn.onmouseenter = () => { delBtn.style.opacity = '0.7'; delBtn.style.transform = 'scale(1.1)'; };
+        delBtn.onmouseleave = () => { delBtn.style.opacity = '1'; delBtn.style.transform = 'scale(1)'; };
+        delBtn.onclick = () => { popup.querySelector('#addon-note-textarea').value = ''; saveNote(); };
+
+        popup.querySelector('#addon-note-textarea').addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                saveNote();
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                saveNote();
+            }
+        });
+
+        window.addonHideNotePopupDelayed = function() {
+            const editMode = popup.querySelector('#addon-note-edit-mode');
+            const settingsMode = popup.querySelector('#addon-note-settings-mode');
+            const colorPicker = document.getElementById('addon-tag-color-picker');
+
+            if (editMode && editMode.style.display !== 'flex' && settingsMode && settingsMode.style.display !== 'flex' && (!colorPicker || colorPicker.style.display === 'none')) {
+                hideTimer = setTimeout(() => popup.style.display = 'none', 150);
+            }
+        };
+    }
+
+
+
+
+
+
+
     function runAllLogic() {
         applyCustomBackground();
         initUI();
@@ -6411,6 +7603,7 @@ function openFiltersModal() {
         injectCreateButton();
         enhanceSettingsMenu();
         injectFavoriteMenu();
+        initNotePopupSystem();
         enhanceAssigneeMenu();
         injectBackToTopButton();
 
